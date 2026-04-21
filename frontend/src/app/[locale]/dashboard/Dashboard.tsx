@@ -1,6 +1,7 @@
 'use client'
 import { useEffect, useState, useCallback } from 'react'
 import { useSearchParams, useRouter } from 'next/navigation'
+import { useTranslations } from 'next-intl'
 
 const API = process.env.NEXT_PUBLIC_API_URL
 
@@ -12,15 +13,17 @@ interface Job {
 }
 
 function StatusBadge({ status }: { status: string }) {
+  const t = useTranslations('Dashboard.status')
   return (
     <span className={`badge badge-${status}`}>
       {status === 'running' && <span className="pulse" style={{ width: 6, height: 6, borderRadius: '50%', background: '#60aaff', display: 'inline-block' }} />}
-      {status}
+      {t(status as any)}
     </span>
   )
 }
 
 function JobCard({ job, onRefresh }: { job: Job; onRefresh: () => void }) {
+  const t = useTranslations('Dashboard')
   const pct = job.total_images > 0 ? Math.round((job.processed / job.total_images) * 100) : 0
   const url = new URL(job.yupoo_url)
 
@@ -30,7 +33,7 @@ function JobCard({ job, onRefresh }: { job: Job; onRefresh: () => void }) {
         <div>
           <div style={{ fontWeight: 600, fontSize: 14, marginBottom: 2 }}>{url.hostname}{url.pathname}</div>
           <div style={{ fontSize: 12, color: 'var(--muted)' }}>
-            {new Date(job.created_at * 1000).toLocaleString('pt-BR')} · {job.destination === 'drive' ? 'Google Drive' : 'Download'}
+            {new Date(job.created_at * 1000).toLocaleString()} · {job.destination === 'drive' ? 'Google Drive' : 'Download'}
           </div>
         </div>
         <StatusBadge status={job.status} />
@@ -42,9 +45,9 @@ function JobCard({ job, onRefresh }: { job: Job; onRefresh: () => void }) {
             <div style={{ height: 4, width: `${pct}%`, background: job.status === 'completed' ? 'var(--success)' : 'var(--accent)', borderRadius: 4, transition: 'width .4s' }} />
           </div>
           <div style={{ display: 'flex', gap: 16, fontSize: 13, color: 'var(--muted)' }}>
-            <span>{job.processed}/{job.total_images} imagens</span>
+            <span>{t('images_count', {processed: job.processed, total: job.total_images})}</span>
             {job.failed > 0 && <span style={{ color: 'var(--danger)' }}>{job.failed} falhas</span>}
-            <span>{job.credits_used} créditos</span>
+            <span>{t('credits_count', {amount: job.credits_used})}</span>
             <span style={{ marginLeft: 'auto' }}>{pct}%</span>
           </div>
         </>
@@ -52,7 +55,7 @@ function JobCard({ job, onRefresh }: { job: Job; onRefresh: () => void }) {
 
       {job.status === 'running' && (
         <button className="btn-ghost" onClick={onRefresh} style={{ marginTop: 10, padding: '6px 14px', fontSize: 12 }}>
-          Atualizar
+          {t('refresh')}
         </button>
       )}
     </div>
@@ -60,6 +63,7 @@ function JobCard({ job, onRefresh }: { job: Job; onRefresh: () => void }) {
 }
 
 export default function DashboardInner() {
+  const t = useTranslations('Dashboard')
   const params = useSearchParams()
   const router = useRouter()
   const [user, setUser] = useState<User | null>(null)
@@ -115,15 +119,15 @@ export default function DashboardInner() {
         body: JSON.stringify({ yupoo_url: url.trim(), destination: 'drive', drive_token: dt || '' }),
       })
       const data = await r.json()
-      if (!r.ok) { setError(data.detail || 'Erro ao criar job'); return }
+      if (!r.ok) { setError(data.detail || 'Error creating job'); return }
       setUrl(''); setTab('history'); fetchJobs(); fetchUser()
-    } catch { setError('Erro de conexão') }
+    } catch { setError('Connection error') }
     finally { setSubmitting(false) }
   }
 
   if (!user) return (
     <div style={{ minHeight: '100vh', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
-      <div style={{ color: 'var(--muted)', fontSize: 14 }}>Carregando...</div>
+      <div style={{ color: 'var(--muted)', fontSize: 14 }}>{t('loading')}</div>
     </div>
   )
 
@@ -136,11 +140,11 @@ export default function DashboardInner() {
         </span>
         <div style={{ display: 'flex', alignItems: 'center', gap: 14 }}>
           <div style={{ textAlign: 'right' }}>
-            <div style={{ fontSize: 13, color: 'var(--muted)' }}>créditos</div>
-            <div style={{ fontWeight: 700, fontSize: 18, color: 'var(--accent)', lineHeight: 1 }}>{user.credits.toLocaleString('pt-BR')}</div>
+            <div style={{ fontSize: 13, color: 'var(--muted)' }}>{t('credits_plural')}</div>
+            <div style={{ fontWeight: 700, fontSize: 18, color: 'var(--accent)', lineHeight: 1 }}>{user.credits.toLocaleString()}</div>
           </div>
           <a href="/pricing">
-            <button className="btn-ghost" style={{ padding: '7px 14px', fontSize: 13 }}>Comprar</button>
+            <button className="btn-ghost" style={{ padding: '7px 14px', fontSize: 13 }}>{t('buy')}</button>
           </a>
           <div style={{ width: 34, height: 34, borderRadius: '50%', background: 'var(--bg3)', border: '1px solid var(--border)', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 13, fontWeight: 600, cursor: 'pointer' }}
             title={user.email} onClick={() => { localStorage.clear(); window.location.href = '/' }}>
@@ -152,39 +156,39 @@ export default function DashboardInner() {
       <main style={{ flex: 1, maxWidth: 720, margin: '0 auto', width: '100%', padding: '2rem 1.5rem' }}>
         {/* Tabs */}
         <div style={{ display: 'flex', gap: 4, marginBottom: '1.5rem', background: 'var(--bg3)', borderRadius: 10, padding: 4 }}>
-          {(['new', 'history'] as const).map(t => (
-            <button key={t} onClick={() => setTab(t)}
+          {(['new', 'history'] as const).map(tabKey => (
+            <button key={tabKey} onClick={() => setTab(tabKey)}
               style={{ flex: 1, padding: '8px 0', borderRadius: 8, fontSize: 14, fontWeight: 500,
-                background: tab === t ? 'var(--bg2)' : 'transparent',
-                color: tab === t ? 'var(--text)' : 'var(--muted)',
-                border: tab === t ? '1px solid var(--border)' : 'none' }}>
-              {t === 'new' ? 'Novo download' : `Histórico (${jobs.length})`}
+                background: tab === tabKey ? 'var(--bg2)' : 'transparent',
+                color: tab === tabKey ? 'var(--text)' : 'var(--muted)',
+                border: tab === tabKey ? '1px solid var(--border)' : 'none' }}>
+              {tabKey === 'new' ? t('newJob') : t('history', {amount: jobs.length})}
             </button>
           ))}
         </div>
 
         {tab === 'new' && (
           <div className="card">
-            <h2 style={{ fontWeight: 700, fontSize: 18, marginBottom: 4 }}>Novo download</h2>
+            <h2 style={{ fontWeight: 700, fontSize: 18, marginBottom: 4 }}>{t('newJob')}</h2>
             <p style={{ fontSize: 14, color: 'var(--muted)', marginBottom: '1.25rem' }}>
-              Cole o link de qualquer álbum da Yupoo. As imagens serão enviadas para o seu Google Drive.
+              {t('Index.subtitle')}
             </p>
-            <label style={{ fontSize: 13, color: 'var(--muted)', marginBottom: 6, display: 'block' }}>Link do álbum</label>
+            <label style={{ fontSize: 13, color: 'var(--muted)', marginBottom: 6, display: 'block' }}>{t('urlLabel')}</label>
             <input value={url} onChange={e => setUrl(e.target.value)}
-              placeholder="https://storenome.x.yupoo.com/albums/12345"
+              placeholder={t('urlPlaceholder')}
               onKeyDown={e => e.key === 'Enter' && submit()} />
             {error && <p style={{ color: 'var(--danger)', fontSize: 13, marginTop: 8 }}>{error}</p>}
             <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginTop: '1rem' }}>
               <span style={{ fontSize: 13, color: 'var(--muted)' }}>
-                {user.credits} crédito{user.credits !== 1 ? 's' : ''} disponível{user.credits !== 1 ? 'is' : ''}
+                {user.credits} {user.credits === 1 ? t('credits') : t('credits_plural')} {user.credits === 1 ? t('available') : t('available_plural')}
               </span>
               <button className="btn-primary" onClick={submit} disabled={submitting || !url.trim() || user.credits < 1}>
-                {submitting ? 'Enviando...' : 'Iniciar download'}
+                {submitting ? t('submitting') : t('start')}
               </button>
             </div>
             {user.credits < 1 && (
               <div style={{ marginTop: 12, padding: '10px 14px', background: '#1a0000', border: '1px solid #3a0000', borderRadius: 8, fontSize: 13, color: '#ff8080' }}>
-                Você não tem créditos. <a href="/pricing" style={{ color: 'var(--accent)', textDecoration: 'underline' }}>Comprar créditos →</a>
+                {t('noCredits')} <a href="/pricing" style={{ color: 'var(--accent)', textDecoration: 'underline' }}>{t('buyCreditsLink')}</a>
               </div>
             )}
           </div>
@@ -195,8 +199,8 @@ export default function DashboardInner() {
             {jobs.length === 0 ? (
               <div style={{ textAlign: 'center', padding: '4rem 0', color: 'var(--muted)' }}>
                 <div style={{ fontSize: 32, marginBottom: 12 }}>📂</div>
-                <div>Nenhum download ainda.</div>
-                <button className="btn-ghost" onClick={() => setTab('new')} style={{ marginTop: 16, padding: '8px 20px' }}>Criar primeiro download</button>
+                <div>{t('noJobs')}</div>
+                <button className="btn-ghost" onClick={() => setTab('new')} style={{ marginTop: 16, padding: '8px 20px' }}>{t('createFirst')}</button>
               </div>
             ) : (
               jobs.map(j => <JobCard key={j.id} job={j} onRefresh={fetchJobs} />)

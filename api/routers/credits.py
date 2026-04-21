@@ -27,7 +27,7 @@ async def create_checkout(package_id: str, request: Request):
     user = get_current_user(request)
     pkg = PACKAGES.get(package_id)
     if not pkg:
-        raise HTTPException(status_code=404, detail="Pacote não encontrado")
+        raise HTTPException(status_code=404, detail="Package not found")
 
     session = stripe.checkout.Session.create(
         payment_method_types=["card"],
@@ -65,7 +65,7 @@ async def stripe_webhook(request: Request, stripe_signature: str = Header(None))
         conn.execute("UPDATE users SET credits = credits + ? WHERE id = ?", (credits, user_id))
         conn.execute(
             "INSERT INTO transactions (id, user_id, type, amount, description, stripe_id) VALUES (?, ?, ?, ?, ?, ?)",
-            (str(uuid.uuid4()), user_id, "purchase", credits, f"Compra pacote {pkg_id}", stripe_id)
+            (str(uuid.uuid4()), user_id, "purchase", credits, f"Purchase: {pkg_id}", stripe_id)
         )
         conn.commit()
 

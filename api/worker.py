@@ -41,7 +41,7 @@ def _deduct_credits(user_id, amount):
     conn.execute("UPDATE users SET credits = MAX(0, credits - ?) WHERE id = ?", (amount, user_id))
     conn.execute(
         "INSERT INTO transactions (id, user_id, type, amount, description) VALUES (?, ?, ?, ?, ?)",
-        (str(uuid.uuid4()), user_id, "usage", -amount, f"Download de {amount} imagens")
+        (str(uuid.uuid4()), user_id, "usage", -amount, f"Download: {amount} images")
     )
     conn.commit()
     conn.close()
@@ -160,23 +160,23 @@ def _drive_upload(drive_token, data, filename, folder_id, mime="image/jpeg"):
 def run_job(job_id: str, user_id: str, yupoo_url: str, destination: str, drive_token: str):
     try:
         _update_job(job_id, status="running")
-        _append_log(job_id, f"Iniciando scraping: {yupoo_url}")
+        _append_log(job_id, f"Starting scraping: {yupoo_url}")
 
         images, album_name = scrape_album(yupoo_url)
         total = len(images)
 
         if total == 0:
-            _update_job(job_id, status="failed", log="Nenhuma imagem encontrada.")
+            _update_job(job_id, status="failed", log="No images found.")
             return
 
         _update_job(job_id, total_images=total)
-        _append_log(job_id, f"Encontradas {total} imagens no álbum: {album_name}")
+        _append_log(job_id, f"Found {total} images in album: {album_name}")
 
         # Verifica créditos
         available = _get_user_credits(user_id)
         if available < 1:
             _update_job(job_id, status="failed")
-            _append_log(job_id, "Créditos insuficientes.")
+            _append_log(job_id, "Insufficient credits.")
             return
 
         # Cria pasta no Drive
@@ -185,7 +185,7 @@ def run_job(job_id: str, user_id: str, yupoo_url: str, destination: str, drive_t
             root = _drive_create_folder(drive_token, "Yupoo Downloads")
             folder_id = _drive_create_folder(drive_token, album_name, root)
             _update_job(job_id, drive_folder_id=folder_id)
-            _append_log(job_id, f"Pasta criada no Drive: {album_name}")
+            _append_log(job_id, f"Folder created in Drive: {album_name}")
 
         session = requests.Session()
         session.headers.update(HEADERS)
@@ -197,12 +197,12 @@ def run_job(job_id: str, user_id: str, yupoo_url: str, destination: str, drive_t
             status = conn.execute("SELECT status FROM jobs WHERE id = ?", (job_id,)).fetchone()["status"]
             conn.close()
             if status == "cancelled":
-                _append_log(job_id, "Job cancelado pelo usuário.")
+                _append_log(job_id, "Job cancelled by user.")
                 break
 
             # Verifica créditos a cada imagem
             if _get_user_credits(user_id) < 1:
-                _append_log(job_id, "Créditos esgotados — job pausado.")
+                _append_log(job_id, "Credits exhausted — job paused.")
                 _update_job(job_id, status="paused")
                 return
 
@@ -237,7 +237,7 @@ def run_job(job_id: str, user_id: str, yupoo_url: str, destination: str, drive_t
             time.sleep(0.3)
 
         _update_job(job_id, status="completed")
-        _append_log(job_id, f"Concluído. {processed} enviadas, {failed} falhas.")
+        _append_log(job_id, f"Completed. {processed} sent, {failed} failed.")
 
     except Exception as e:
         logger.error(f"Job {job_id} falhou: {e}")

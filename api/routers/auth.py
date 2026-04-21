@@ -32,19 +32,19 @@ def decode_jwt(token: str) -> dict:
     try:
         return jwt.decode(token, JWT_SECRET, algorithms=["HS256"])
     except Exception:
-        raise HTTPException(status_code=401, detail="Token inválido ou expirado")
+        raise HTTPException(status_code=401, detail="Invalid or expired token")
 
 def get_current_user(request: Request) -> dict:
     auth_header = request.headers.get("Authorization", "")
     if not auth_header.startswith("Bearer "):
-        raise HTTPException(status_code=401, detail="Não autenticado")
+        raise HTTPException(status_code=401, detail="Not authenticated")
     token = auth_header[7:]
     payload = decode_jwt(token)
     conn = get_conn()
     user = conn.execute("SELECT * FROM users WHERE id = ?", (payload["sub"],)).fetchone()
     conn.close()
     if not user:
-        raise HTTPException(status_code=401, detail="Usuário não encontrado")
+        raise HTTPException(status_code=401, detail="User not found")
     return dict(user)
 
 @router.get("/google")
@@ -93,7 +93,7 @@ async def google_callback(code: str):
         )
         conn.execute(
             "INSERT INTO transactions (id, user_id, type, amount, description) VALUES (?, ?, ?, ?, ?)",
-            (str(uuid.uuid4()), user_id, "bonus", 10, "Créditos de boas-vindas")
+            (str(uuid.uuid4()), user_id, "bonus", 10, "Welcome Bonus")
         )
         conn.commit()
         user_id_final = user_id
