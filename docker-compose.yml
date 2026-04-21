@@ -1,0 +1,74 @@
+version: '3.9'
+
+services:
+
+  api:
+    build: ./api
+    container_name: yupoo-api
+    restart: unless-stopped
+    environment:
+      # ── Google OAuth ─────────────────────────────────────────
+      GOOGLE_CLIENT_ID:      ${GOOGLE_CLIENT_ID}
+      GOOGLE_CLIENT_SECRET:  ${GOOGLE_CLIENT_SECRET}
+      GOOGLE_REDIRECT_URI:   ${GOOGLE_REDIRECT_URI}     # ex: https://seudominio.com/api/auth/callback
+
+      # ── JWT ──────────────────────────────────────────────────
+      JWT_SECRET:            ${JWT_SECRET}               # gere com: openssl rand -hex 32
+
+      # ── Stripe ───────────────────────────────────────────────
+      STRIPE_SECRET_KEY:     ${STRIPE_SECRET_KEY}
+      STRIPE_WEBHOOK_SECRET: ${STRIPE_WEBHOOK_SECRET}
+      STRIPE_PRICE_STARTER:  ${STRIPE_PRICE_STARTER}    # price_xxx do Stripe Dashboard
+      STRIPE_PRICE_PRO:      ${STRIPE_PRICE_PRO}
+      STRIPE_PRICE_BUSINESS: ${STRIPE_PRICE_BUSINESS}
+      STRIPE_PRICE_UNLIMITED:${STRIPE_PRICE_UNLIMITED}
+
+      # ── App ──────────────────────────────────────────────────
+      FRONTEND_URL:          ${FRONTEND_URL}             # ex: https://seudominio.com
+      ALLOWED_ORIGINS:       ${FRONTEND_URL}
+      DB_PATH:               /data/yupoo.db
+
+    volumes:
+      - yupoo_data:/data
+    networks:
+      - yupoo_net
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+
+  frontend:
+    build:
+      context: ./frontend
+      args:
+        NEXT_PUBLIC_API_URL: ${NEXT_PUBLIC_API_URL}      # ex: https://seudominio.com/api
+    container_name: yupoo-frontend
+    restart: unless-stopped
+    environment:
+      NEXT_PUBLIC_API_URL: ${NEXT_PUBLIC_API_URL}
+    networks:
+      - yupoo_net
+    depends_on:
+      - api
+
+  nginx:
+    image: nginx:alpine
+    container_name: yupoo-nginx
+    restart: unless-stopped
+    ports:
+      - "80:80"
+    volumes:
+      - ./nginx/nginx.conf:/etc/nginx/nginx.conf:ro
+    networks:
+      - yupoo_net
+    depends_on:
+      - api
+      - frontend
+
+volumes:
+  yupoo_data:
+
+networks:
+  yupoo_net:
+    driver: bridge

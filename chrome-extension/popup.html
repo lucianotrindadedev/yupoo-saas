@@ -1,0 +1,115 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+<meta charset="UTF-8">
+<style>
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body {
+    width: 320px;
+    font-family: -apple-system, 'Segoe UI', sans-serif;
+    font-size: 14px;
+    background: #0a0a0a;
+    color: #efefef;
+    padding: 16px;
+  }
+  .logo { font-weight: 800; font-size: 16px; margin-bottom: 14px; letter-spacing: -0.02em; }
+  .logo span { color: #e8ff47; }
+  .credits-bar {
+    background: #1a1a1a;
+    border: 1px solid #2a2a2a;
+    border-radius: 8px;
+    padding: 10px 12px;
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin-bottom: 12px;
+  }
+  .credits-val { font-size: 20px; font-weight: 700; color: #e8ff47; }
+  .credits-lbl { font-size: 11px; color: #666; margin-top: 1px; }
+  .url-box {
+    background: #111;
+    border: 1px solid #2a2a2a;
+    border-radius: 8px;
+    padding: 8px 12px;
+    font-size: 12px;
+    color: #888;
+    margin-bottom: 12px;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+  button {
+    width: 100%;
+    padding: 11px;
+    border: none;
+    border-radius: 8px;
+    font-size: 14px;
+    font-weight: 600;
+    cursor: pointer;
+    font-family: inherit;
+    transition: opacity .15s;
+  }
+  button:disabled { opacity: 0.4; cursor: not-allowed; }
+  .btn-main { background: #e8ff47; color: #000; margin-bottom: 8px; }
+  .btn-main:hover:not(:disabled) { background: #c8df20; }
+  .btn-login { background: #1a1a1a; color: #efefef; border: 1px solid #2a2a2a; }
+  .btn-login:hover { background: #222; }
+  .status {
+    margin-top: 10px;
+    padding: 8px 12px;
+    border-radius: 8px;
+    font-size: 12px;
+    line-height: 1.5;
+    display: none;
+  }
+  .status.ok { background: #001a0a; color: #4ade80; border: 1px solid #00401a; display: block; }
+  .status.err { background: #1a0000; color: #ff6060; border: 1px solid #3a0000; display: block; }
+  .status.info { background: #001a3a; color: #60aaff; border: 1px solid #003a7a; display: block; }
+  .progress { height: 3px; background: #1a1a1a; border-radius: 2px; margin-top: 10px; overflow: hidden; display: none; }
+  .progress-fill { height: 3px; background: #e8ff47; border-radius: 2px; width: 0%; transition: width .3s; }
+  .footer { margin-top: 14px; text-align: center; font-size: 11px; color: #444; }
+  .footer a { color: #666; text-decoration: none; }
+  .footer a:hover { color: #e8ff47; }
+  #not-yupoo { text-align: center; padding: 10px 0; color: #555; font-size: 13px; }
+</style>
+</head>
+<body>
+  <div class="logo">yupoo<span>dl</span></div>
+
+  <div id="main">
+    <div class="credits-bar">
+      <div>
+        <div class="credits-val" id="creditsVal">—</div>
+        <div class="credits-lbl">créditos disponíveis</div>
+      </div>
+      <a href="#" id="buyLink" style="font-size:12px;color:#e8ff47;text-decoration:none;">Comprar →</a>
+    </div>
+
+    <div class="url-box" id="currentUrl">Detectando página...</div>
+
+    <button class="btn-main" id="downloadBtn" disabled>Baixar álbum para o Drive</button>
+
+    <div class="progress" id="progressBar">
+      <div class="progress-fill" id="progressFill"></div>
+    </div>
+    <div class="status" id="statusMsg"></div>
+  </div>
+
+  <div id="not-yupoo" style="display:none">
+    Esta página não é um álbum da Yupoo.
+  </div>
+
+  <div id="login-section" style="display:none">
+    <p style="color:#888;font-size:13px;margin-bottom:12px;line-height:1.5">
+      Faça login para baixar álbuns da Yupoo direto para o seu Google Drive.
+    </p>
+    <button class="btn-login" id="loginBtn">Entrar com Google</button>
+  </div>
+
+  <div class="footer">
+    <a href="#" id="dashLink">Dashboard</a> · <a href="#" id="pricingLink">Preços</a>
+  </div>
+
+  <script src="popup.js"></script>
+</body>
+</html>
