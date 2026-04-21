@@ -21,7 +21,7 @@ services:
       STRIPE_PRICE_STARTER:  ${STRIPE_PRICE_STARTER}    # price_xxx do Stripe Dashboard
       STRIPE_PRICE_PRO:      ${STRIPE_PRICE_PRO}
       STRIPE_PRICE_BUSINESS: ${STRIPE_PRICE_BUSINESS}
-      STRIPE_PRICE_UNLIMITED:${STRIPE_PRICE_UNLIMITED}
+      STRIPE_PRICE_UNLIMITED: ${STRIPE_PRICE_UNLIMITED}
 
       # ── App ──────────────────────────────────────────────────
       FRONTEND_URL:          ${FRONTEND_URL}             # ex: https://seudominio.com
