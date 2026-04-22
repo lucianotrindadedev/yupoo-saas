@@ -312,8 +312,9 @@ def _process_images(job_id, user_id, images, destination, drive_token, folder_id
             return processed, failed, credits_used, True
 
         if images_in_current_batch == 0:
-            if _get_user_credits(user_id) < 1:
-                _append_log(job_id, "Credits exhausted — job paused.")
+            available = _get_user_credits(user_id)
+            if available < 1:
+                _append_log(job_id, f"Credits exhausted (Balance: {available}) — job paused.")
                 _update_job(job_id, status="paused")
                 return processed, failed, credits_used, True
 

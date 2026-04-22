@@ -63,6 +63,7 @@
       "running": "Running",
       "completed": "Completed",
       "failed": "Failed",
+      "paused": "Paused (No Credits)",
       "cancelled": "Cancelled"
     }
   }

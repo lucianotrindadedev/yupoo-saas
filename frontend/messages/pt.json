@@ -63,6 +63,7 @@
       "running": "Executando",
       "completed": "Concluído",
       "failed": "Falhou",
+      "paused": "Pausado (Sem Créditos)",
       "cancelled": "Cancelado"
     }
   }
