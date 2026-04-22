@@ -65,12 +65,21 @@ async function init() {
   // Verifica se está em página Yupoo
   const [tab] = await chrome.tabs.query({ active: true, currentWindow: true })
   const url = tab?.url || ''
-  const isYupoo = /yupoo\.com/.test(url) && /\/albums\//.test(url)
+  const isYupoo = /yupoo\.com/.test(url);
+  const isSingleAlbum = /\/albums\/\d+/.test(url);
 
   if (!isYupoo) {
     $('main').style.display = 'none'
     $('not-yupoo').style.display = 'block'
     return
+  }
+
+  const btn = $('downloadBtn')
+  if (isSingleAlbum) {
+    btn.textContent = 'Baixar Álbum'
+  } else {
+    btn.textContent = 'Baixar Loja Inteira'
+    $('currentUrl').textContent = 'Loja: ' + url.split('/')[2]
   }
 
   $('currentUrl').textContent = url.replace(/https?:\/\//, '').substring(0, 45) + '...'
