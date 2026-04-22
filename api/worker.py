@@ -195,6 +195,33 @@ def scrape_store_albums(store_url):
 
 # ─── Google Drive ─────────────────────────────────────────────────────────────
 
+def _drive_find_folder(drive_token, name, parent_id=None):
+    """Procura uma pasta pelo nome dentro de parent_id (ou raiz). Retorna o ID da primeira encontrada, ou None."""
+    try:
+        # Escapa aspas simples no nome para a query do Drive
+        safe_name = name.replace("'", "\\'")
+        q_parts = [
+            f"name = '{safe_name}'",
+            "mimeType = 'application/vnd.google-apps.folder'",
+            "trashed = false",
+        ]
+        if parent_id:
+            q_parts.append(f"'{parent_id}' in parents")
+        else:
+            q_parts.append("'root' in parents")
+        q = " and ".join(q_parts)
+        r = requests.get(
+            "https://www.googleapis.com/drive/v3/files",
+            headers={"Authorization": f"Bearer {drive_token}"},
+            params={"q": q, "fields": "files(id,name)", "pageSize": 1},
+            timeout=15,
+        )
+        files = r.json().get("files", [])
+        return files[0]["id"] if files else None
+    except Exception as e:
+        logger.error(f"Drive Find Folder Error: {e}")
+        return None
+
 def _drive_create_folder(drive_token, name, parent_id=None):
     try:
         meta = {"name": name, "mimeType": "application/vnd.google-apps.folder"}
@@ -208,6 +235,13 @@ def _drive_create_folder(drive_token, name, parent_id=None):
     except Exception as e:
         logger.error(f"Drive Folder Error: {e}")
         return None
+
+def _drive_get_or_create_folder(drive_token, name, parent_id=None):
+    """Retorna o ID de uma pasta com esse nome; cria se não existir."""
+    existing = _drive_find_folder(drive_token, name, parent_id)
+    if existing:
+        return existing
+    return _drive_create_folder(drive_token, name, parent_id)
 
 def _drive_upload(drive_token, data, filename, folder_id, mime="image/jpeg"):
     try:
@@ -299,10 +333,9 @@ def run_job(job_id, user_id, yupoo_url, destination, drive_token, pre_scraped_im
 
         folder_id = None
         if destination == "drive":
-            root = _drive_create_folder(drive_token, "Yupoo Downloads")
-            folder_id = _drive_create_folder(drive_token, album_name, root)
+            folder_id = _drive_get_or_create_folder(drive_token, "Yupoo Downloader")
             if not folder_id:
-                raise Exception("Não foi possível criar a pasta no Google Drive.")
+                raise Exception("Não foi possível acessar a pasta no Google Drive.")
 
         _process_images(job_id, user_id, images, destination, drive_token, folder_id, yupoo_url)
         _update_job(job_id, status="completed")
@@ -322,10 +355,9 @@ def run_store_job(job_id, user_id, store_url, destination, drive_token):
             return
             
         _append_log(job_id, f"Loja {store_name}: {len(albums)} álbuns encontrados.")
-        root_id = None
+        folder_id = None
         if destination == "drive":
-            base_root = _drive_create_folder(drive_token, "Yupoo Downloads")
-            root_id = _drive_create_folder(drive_token, store_name, base_root)
+            folder_id = _drive_get_or_create_folder(drive_token, "Yupoo Downloader")
 
         for i, alb in enumerate(albums):
             _append_log(job_id, f"Processando álbum {i+1}/{len(albums)}: {alb['title']}")
@@ -334,8 +366,7 @@ def run_store_job(job_id, user_id, store_url, destination, drive_token):
                 # Re-usa a lógica do run_job para cada álbum
                 images, photo_ids, album_name = scrape_album(alb['url'])
                 if images:
-                    folder = _drive_create_folder(drive_token, album_name, root_id) if root_id else None
-                    _process_images(job_id, user_id, images, destination, drive_token, folder, alb['url'])
+                    _process_images(job_id, user_id, images, destination, drive_token, folder_id, alb['url'])
             except: pass
             time.sleep(2)
             
