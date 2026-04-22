@@ -200,6 +200,27 @@ def scrape_album(start_url):
             if img_url and img_url not in seen:
                 seen.add(img_url)
                 all_images.append(img_url)
+            
+            # Filter to get high-res image only
+            # The high-res images usually have a long hex ID like '01e91c86.jpg'
+            # We explicitly ignore generic names that Yupoo uses for thumbnails/previews
+            soup = BeautifulSoup(r.text, "html.parser")
+            for img in soup.find_all("img", src=True):
+                src = img["src"]
+                if "photo.yupoo.com" in src:
+                    # Skip generic/duplicate sizes
+                    fname = src.split("/")[-1].lower()
+                    if fname in ["big.jpg", "medium.jpg", "small.jpg", "square.jpg", "logo.png"]:
+                        continue
+                    
+                    # Ensure it's not a thumbnail (usually has /small/ or /medium/ in path)
+                    if "/small/" in src or "/medium/" in src or "/square/" in src:
+                        continue
+
+                    img_url = urljoin("https:", src) if src.startswith("//") else src
+                    if img_url and img_url not in seen:
+                        seen.add(img_url)
+                        all_images.append(img_url)
             time.sleep(0.4)
 
     except Exception as e:
