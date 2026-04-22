@@ -333,9 +333,13 @@ def run_job(job_id, user_id, yupoo_url, destination, drive_token, pre_scraped_im
 
         folder_id = None
         if destination == "drive":
-            folder_id = _drive_get_or_create_folder(drive_token, "Yupoo Downloader")
+            root = _drive_get_or_create_folder(drive_token, "Yupoo Downloader")
+            if not root:
+                raise Exception("Não foi possível acessar a pasta raiz 'Yupoo Downloader' no Google Drive.")
+            folder_id = _drive_get_or_create_folder(drive_token, album_name, root)
             if not folder_id:
-                raise Exception("Não foi possível acessar a pasta no Google Drive.")
+                raise Exception(f"Não foi possível criar a pasta do álbum '{album_name}' no Google Drive.")
+            _append_log(job_id, f"Pasta no Drive: Yupoo Downloader/{album_name}")
 
         _process_images(job_id, user_id, images, destination, drive_token, folder_id, yupoo_url)
         _update_job(job_id, status="completed")
@@ -355,18 +359,19 @@ def run_store_job(job_id, user_id, store_url, destination, drive_token):
             return
             
         _append_log(job_id, f"Loja {store_name}: {len(albums)} álbuns encontrados.")
-        folder_id = None
+        root_id = None
         if destination == "drive":
-            folder_id = _drive_get_or_create_folder(drive_token, "Yupoo Downloader")
-            if not folder_id:
-                raise Exception("Não foi possível acessar a pasta 'Yupoo Downloader' no Google Drive.")
+            root_id = _drive_get_or_create_folder(drive_token, "Yupoo Downloader")
+            if not root_id:
+                raise Exception("Não foi possível acessar a pasta raiz 'Yupoo Downloader' no Google Drive.")
 
         for i, alb in enumerate(albums):
             _append_log(job_id, f"Processando álbum {i+1}/{len(albums)}: {alb['title']}")
             try:
                 images, photo_ids, album_name = scrape_album(alb['url'])
                 if images:
-                    _process_images(job_id, user_id, images, destination, drive_token, folder_id, alb['url'])
+                    album_folder = _drive_get_or_create_folder(drive_token, album_name, root_id) if root_id else None
+                    _process_images(job_id, user_id, images, destination, drive_token, album_folder, alb['url'])
             except Exception as e:
                 _append_log(job_id, f"Falha no álbum '{alb.get('title', '?')}': {e}")
             time.sleep(2)
