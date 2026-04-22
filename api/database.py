@@ -39,7 +39,6 @@ def init_db():
         yupoo_url       TEXT NOT NULL,
         status          TEXT DEFAULT 'pending',
         destination     TEXT DEFAULT 'drive',
-        job_type        TEXT DEFAULT 'album',
         drive_folder_id TEXT,
         total_images    INTEGER DEFAULT 0,
         processed       INTEGER DEFAULT 0,
@@ -59,5 +58,12 @@ def init_db():
         created_at  INTEGER DEFAULT (strftime('%s','now'))
     );
     """)
+    
+    # Migração automática: Adicionar job_type se não existir
+    try:
+        c.execute("ALTER TABLE jobs ADD COLUMN job_type TEXT DEFAULT 'album'")
+    except sqlite3.OperationalError:
+        pass # Coluna já existe
+
     conn.commit()
     conn.close()
