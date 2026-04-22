@@ -201,20 +201,25 @@ def scrape_album(start_url):
                 seen.add(img_url)
                 all_images.append(img_url)
             
-            # Filter to get high-res image only
-            # The high-res images usually have a long hex ID like '01e91c86.jpg'
-            # We explicitly ignore generic names that Yupoo uses for thumbnails/previews
+            # High-res images on Yupoo are usually hex-like IDs (e.g., 01e91c86.jpg)
+            # We strictly filter out generic names and thumbnails
             soup = BeautifulSoup(r.text, "html.parser")
             for img in soup.find_all("img", src=True):
                 src = img["src"]
                 if "photo.yupoo.com" in src:
-                    # Skip generic/duplicate sizes
-                    fname = src.split("/")[-1].lower()
-                    if fname in ["big.jpg", "medium.jpg", "small.jpg", "square.jpg", "logo.png"]:
+                    # 1. REMOVE any query strings to get clean filename
+                    clean_src = src.split("?")[0]
+                    fname = clean_src.split("/")[-1].lower()
+                    
+                    # 2. BLACKLIST: If it contains these words anywhere in the path/name, skip it
+                    blacklist = ["big.jpg", "medium.jpg", "small.jpg", "square.jpg", "thumb", "logo", "icon", "static"]
+                    if any(word in src.lower() for word in blacklist):
                         continue
                     
-                    # Ensure it's not a thumbnail (usually has /small/ or /medium/ in path)
-                    if "/small/" in src or "/medium/" in src or "/square/" in src:
+                    # 3. WHITELIST: The high-res image usually has a long unique ID (hexadecimal)
+                    # We only want files that look like an ID (at least 6 characters of hex/random stuff)
+                    # and definitely not "big.jpg"
+                    if len(fname.split('.')[0]) < 6:
                         continue
 
                     img_url = urljoin("https:", src) if src.startswith("//") else src
