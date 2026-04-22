@@ -3,7 +3,7 @@
   "name": "Yupoo Downloader",
   "version": "1.0.0",
   "description": "Baixe álbuns completos da Yupoo direto para o Google Drive com 1 clique.",
-  "permissions": ["activeTab", "storage"],
+  "permissions": ["activeTab", "storage", "scripting"],
   "host_permissions": [
     "https://*.yupoo.com/*", 
     "https://*.x.yupoo.com/*",

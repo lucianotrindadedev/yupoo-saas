@@ -53,6 +53,7 @@ async function startJob(token, driveToken, url) {
     const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
     const [{ result }] = await chrome.scripting.executeScript({
       target: { tabId: tab.id },
+      world: 'MAIN', // <--- MÁGICA ACONTECE AQUI (Permite ler variáveis da página)
       func: () => {
         const data = window.pageData;
         if (data && data.album && data.album.photos) {
