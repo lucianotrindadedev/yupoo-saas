@@ -62,7 +62,6 @@ async function init() {
   $('buyLink').href = `${SITE}/pricing`
   $('pricingLink').href = `${SITE}/pricing`
 
-  // Verifica se está em página Yupoo
   const [tab] = await chrome.tabs.query({ active: true, currentWindow: true })
   const url = tab?.url || ''
   const isYupoo = /yupoo\.com/.test(url);
@@ -76,13 +75,12 @@ async function init() {
 
   const btn = $('downloadBtn')
   if (isSingleAlbum) {
-    btn.textContent = 'Baixar Álbum'
+    btn.textContent = 'Baixar Álbum para o Drive'
+    $('currentUrl').textContent = url.replace(/https?:\/\//, '').substring(0, 40) + '...'
   } else {
-    btn.textContent = 'Baixar Loja Inteira'
-    $('currentUrl').textContent = 'Loja: ' + url.split('/')[2]
+    btn.textContent = 'Baixar Loja Inteira para o Drive'
+    $('currentUrl').textContent = 'Loja: ' + (url.split('/')[2] || 'detectada')
   }
-
-  $('currentUrl').textContent = url.replace(/https?:\/\//, '').substring(0, 45) + '...'
 
   // Verifica autenticação
   const { token, drive_token } = await getToken()
