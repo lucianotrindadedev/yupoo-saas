@@ -133,6 +133,10 @@ async function init() {
       return;
     }
 
+    // Habilita o botão se tiver créditos
+    btn.disabled = false;
+    btn.style.opacity = '1';
+
     // 5. Lógica do Botão
     btn.onclick = async () => {
       btn.disabled = true;
