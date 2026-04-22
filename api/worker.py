@@ -305,11 +305,16 @@ def _drive_upload(drive_token, data, filename, folder_id, mime="image/jpeg"):
 
 # ─── Job principal ────────────────────────────────────────────────────────────
 
-def _process_images(job_id, user_id, images, destination, drive_token, folder_id):
+def _process_images(job_id, user_id, images, destination, drive_token, folder_id, yupoo_url=None):
     """Shared logic: download and upload images for a job."""
     session = requests.Session()
-    session.headers.update(HEADERS)
+    # IMPORTANT: Yupoo requires Referer to allow image downloads
+    referer = yupoo_url or "https://x.yupoo.com/"
+    session.headers.update({**HEADERS, "Referer": referer})
+    
     processed = failed = credits_used = 0
+    # Track images since last credit deduction
+    images_in_current_batch = 0
 
     # Get current progress (for store jobs that process multiple albums)
     conn = get_conn()
@@ -319,6 +324,8 @@ def _process_images(job_id, user_id, images, destination, drive_token, folder_id
         processed = row["processed"]
         failed = row["failed"]
         credits_used = row["credits_used"]
+        # Resume batch counter based on total processed
+        images_in_current_batch = processed % 10
 
     for i, img_url in enumerate(images):
         # Check cancellation
@@ -329,16 +336,18 @@ def _process_images(job_id, user_id, images, destination, drive_token, folder_id
             _append_log(job_id, "Job cancelled by user.")
             return processed, failed, credits_used, True
 
-        # Check credits
-        if _get_user_credits(user_id) < 1:
-            _append_log(job_id, "Credits exhausted — job paused.")
-            _update_job(job_id, status="paused")
-            return processed, failed, credits_used, True
+        # Check credits: only if we are about to start a NEW batch of 10
+        if images_in_current_batch == 0:
+            if _get_user_credits(user_id) < 1:
+                _append_log(job_id, "Credits exhausted — job paused.")
+                _update_job(job_id, status="paused")
+                return processed, failed, credits_used, True
 
         fname = urlparse(img_url).path.split("/")[-1] or f"img_{i:04d}.jpg"
         fname = re.sub(r'[\\/*?:"<>|]', "_", fname)
 
         try:
+            # Re-verify referer just in case
             r = session.get(img_url, timeout=30)
             r.raise_for_status()
             data = r.content
@@ -348,15 +357,22 @@ def _process_images(job_id, user_id, images, destination, drive_token, folder_id
                 ok = _drive_upload(drive_token, data, fname, folder_id, mime)
                 if ok:
                     processed += 1
-                    credits_used += 1
-                    _deduct_credits(user_id, 1)
+                    images_in_current_batch += 1
+                    # Deduct 1 credit for every 10 images
+                    if images_in_current_batch >= 10:
+                        _deduct_credits(user_id, 1)
+                        credits_used += 1
+                        images_in_current_batch = 0
                 else:
                     failed += 1
                     _append_log(job_id, f"Upload failed: {fname}")
             else:
                 processed += 1
-                credits_used += 1
-                _deduct_credits(user_id, 1)
+                images_in_current_batch += 1
+                if images_in_current_batch >= 10:
+                    _deduct_credits(user_id, 1)
+                    credits_used += 1
+                    images_in_current_batch = 0
 
         except Exception as e:
             failed += 1
@@ -398,7 +414,7 @@ def run_job(job_id: str, user_id: str, yupoo_url: str, destination: str, drive_t
             _append_log(job_id, f"Folder created in Drive: {album_name}")
 
         processed, failed, credits_used, stopped = _process_images(
-            job_id, user_id, images, destination, drive_token, folder_id
+            job_id, user_id, images, destination, drive_token, folder_id, yupoo_url=yupoo_url
         )
 
         if not stopped:
@@ -478,7 +494,7 @@ def run_store_job(job_id: str, user_id: str, store_url: str, destination: str, d
                     album_folder = _drive_create_folder(drive_token, album_name or album_title, root_folder)
 
                 processed, failed, credits_used, stopped = _process_images(
-                    job_id, user_id, images, destination, drive_token, album_folder
+                    job_id, user_id, images, destination, drive_token, album_folder, yupoo_url=album_url
                 )
 
                 if stopped:
