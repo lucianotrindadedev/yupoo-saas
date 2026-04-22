@@ -358,16 +358,17 @@ def run_store_job(job_id, user_id, store_url, destination, drive_token):
         folder_id = None
         if destination == "drive":
             folder_id = _drive_get_or_create_folder(drive_token, "Yupoo Downloader")
+            if not folder_id:
+                raise Exception("Não foi possível acessar a pasta 'Yupoo Downloader' no Google Drive.")
 
         for i, alb in enumerate(albums):
             _append_log(job_id, f"Processando álbum {i+1}/{len(albums)}: {alb['title']}")
-            # Aqui simplificamos: rodamos a lógica de álbum dentro da loja
             try:
-                # Re-usa a lógica do run_job para cada álbum
                 images, photo_ids, album_name = scrape_album(alb['url'])
                 if images:
                     _process_images(job_id, user_id, images, destination, drive_token, folder_id, alb['url'])
-            except: pass
+            except Exception as e:
+                _append_log(job_id, f"Falha no álbum '{alb.get('title', '?')}': {e}")
             time.sleep(2)
             
         _update_job(job_id, status="completed")
