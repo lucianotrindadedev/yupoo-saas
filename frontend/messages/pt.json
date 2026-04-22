@@ -58,6 +58,7 @@
     "refresh": "Atualizar",
     "images_count": "{processed} de {total} imagens",
     "credits_count": "{amount} créditos",
+    "viewLog": "Ver Log de Execução",
     "status": {
       "pending": "Pendente",
       "running": "Executando",

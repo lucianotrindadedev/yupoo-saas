@@ -57,6 +57,28 @@ function JobCard({ job, onRefresh }: { job: Job; onRefresh: () => void }) {
         </>
       )}
 
+      {job.log && (
+        <details style={{ marginTop: 10 }}>
+          <summary style={{ fontSize: 12, color: 'var(--muted)', cursor: 'pointer', outline: 'none' }}>
+            {t('viewLog')}
+          </summary>
+          <pre style={{ 
+            marginTop: 8, 
+            padding: 10, 
+            background: '#000', 
+            color: '#0f0', 
+            fontSize: 11, 
+            borderRadius: 4, 
+            maxHeight: 200, 
+            overflowY: 'auto',
+            whiteSpace: 'pre-wrap',
+            fontFamily: 'monospace'
+          }}>
+            {job.log}
+          </pre>
+        </details>
+      )}
+
       {job.status === 'running' && (
         <button className="btn-ghost" onClick={onRefresh} style={{ marginTop: 10, padding: '6px 14px', fontSize: 12 }}>
           {t('refresh')}

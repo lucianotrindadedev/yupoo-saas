@@ -58,6 +58,7 @@
     "refresh": "Refresh",
     "images_count": "{processed} of {total} images",
     "credits_count": "{amount} credits",
+    "viewLog": "View Execution Log",
     "status": {
       "pending": "Pending",
       "running": "Running",
