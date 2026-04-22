@@ -37,6 +37,7 @@ def init_db():
         id              TEXT PRIMARY KEY,
         user_id         TEXT NOT NULL,
         yupoo_url       TEXT NOT NULL,
+        album_name      TEXT,
         status          TEXT DEFAULT 'pending',
         destination     TEXT DEFAULT 'drive',
         drive_folder_id TEXT,
@@ -59,9 +60,14 @@ def init_db():
     );
     """)
     
-    # Migração automática: Adicionar job_type se não existir
+    # Migrações automáticas
     try:
         c.execute("ALTER TABLE jobs ADD COLUMN job_type TEXT DEFAULT 'album'")
+    except sqlite3.OperationalError:
+        pass # Coluna já existe
+
+    try:
+        c.execute("ALTER TABLE jobs ADD COLUMN album_name TEXT")
     except sqlite3.OperationalError:
         pass # Coluna já existe
 
