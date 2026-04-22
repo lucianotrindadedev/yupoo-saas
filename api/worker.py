@@ -208,6 +208,68 @@ def scrape_album(start_url):
     logger.info(f"Total images found: {len(all_images)} for album: {album_name}")
     return all_images, album_name
 
+# ─── Store Scraper ────────────────────────────────────────────────────────────
+
+def scrape_store_albums(store_url):
+    """Scrape a Yupoo store page and return list of album URLs."""
+    session = requests.Session()
+    session.headers.update(HEADERS)
+    albums = []
+    seen = set()
+
+    # Normalize URL to albums page
+    parsed = urlparse(store_url)
+    base = f"{parsed.scheme}://{parsed.netloc}"
+    page = 1
+
+    while True:
+        url = f"{base}/albums?page={page}"
+        try:
+            r = session.get(url, timeout=20)
+            r.raise_for_status()
+            soup = BeautifulSoup(r.text, "html.parser")
+
+            # Find album links - pattern: /albums/{id}
+            found = 0
+            for a in soup.find_all("a", href=True):
+                href = a["href"]
+                m = re.search(r'/albums/(\d+)', href)
+                if m:
+                    album_id = m.group(1)
+                    if album_id not in seen:
+                        seen.add(album_id)
+                        full_url = urljoin(base, f"/albums/{album_id}?uid=1")
+                        # Try to get album title from the link text or nearby element
+                        title = a.get_text(strip=True) or f"Album {album_id}"
+                        title = re.sub(r'[\\/*?:"<>|]', "_", title)[:60].strip()
+                        albums.append({"url": full_url, "title": title, "id": album_id})
+                        found += 1
+
+            if found == 0:
+                break  # No more albums on this page
+
+            page += 1
+            time.sleep(0.8)
+
+        except Exception as e:
+            logger.warning(f"Error scraping store page {page}: {e}")
+            break
+
+    # Get store name
+    try:
+        r = session.get(base, timeout=15)
+        soup = BeautifulSoup(r.text, "html.parser")
+        title_el = soup.find("title")
+        store_name = title_el.get_text(strip=True) if title_el else parsed.netloc.split(".")[0]
+        store_name = re.sub(r'\s*\|.*$', '', store_name).strip()
+        store_name = re.sub(r'[\\/*?:"<>|]', "_", store_name)[:40]
+    except:
+        store_name = parsed.netloc.split(".")[0]
+
+    logger.info(f"Store '{store_name}': found {len(albums)} albums")
+    return albums, store_name
+
+
 # ─── Google Drive helpers ─────────────────────────────────────────────────────
 
 def _drive_create_folder(drive_token, name, parent_id=None):
@@ -243,6 +305,69 @@ def _drive_upload(drive_token, data, filename, folder_id, mime="image/jpeg"):
 
 # ─── Job principal ────────────────────────────────────────────────────────────
 
+def _process_images(job_id, user_id, images, destination, drive_token, folder_id):
+    """Shared logic: download and upload images for a job."""
+    session = requests.Session()
+    session.headers.update(HEADERS)
+    processed = failed = credits_used = 0
+
+    # Get current progress (for store jobs that process multiple albums)
+    conn = get_conn()
+    row = conn.execute("SELECT processed, failed, credits_used FROM jobs WHERE id = ?", (job_id,)).fetchone()
+    conn.close()
+    if row:
+        processed = row["processed"]
+        failed = row["failed"]
+        credits_used = row["credits_used"]
+
+    for i, img_url in enumerate(images):
+        # Check cancellation
+        conn = get_conn()
+        status = conn.execute("SELECT status FROM jobs WHERE id = ?", (job_id,)).fetchone()["status"]
+        conn.close()
+        if status == "cancelled":
+            _append_log(job_id, "Job cancelled by user.")
+            return processed, failed, credits_used, True
+
+        # Check credits
+        if _get_user_credits(user_id) < 1:
+            _append_log(job_id, "Credits exhausted — job paused.")
+            _update_job(job_id, status="paused")
+            return processed, failed, credits_used, True
+
+        fname = urlparse(img_url).path.split("/")[-1] or f"img_{i:04d}.jpg"
+        fname = re.sub(r'[\\/*?:"<>|]', "_", fname)
+
+        try:
+            r = session.get(img_url, timeout=30)
+            r.raise_for_status()
+            data = r.content
+            mime = "image/png" if fname.endswith(".png") else "image/jpeg"
+
+            if destination == "drive" and folder_id:
+                ok = _drive_upload(drive_token, data, fname, folder_id, mime)
+                if ok:
+                    processed += 1
+                    credits_used += 1
+                    _deduct_credits(user_id, 1)
+                else:
+                    failed += 1
+                    _append_log(job_id, f"Upload failed: {fname}")
+            else:
+                processed += 1
+                credits_used += 1
+                _deduct_credits(user_id, 1)
+
+        except Exception as e:
+            failed += 1
+            _append_log(job_id, f"Error: {fname} — {e}")
+
+        _update_job(job_id, processed=processed, failed=failed, credits_used=credits_used)
+        time.sleep(0.3)
+
+    return processed, failed, credits_used, False
+
+
 def run_job(job_id: str, user_id: str, yupoo_url: str, destination: str, drive_token: str):
     try:
         _update_job(job_id, status="running")
@@ -258,14 +383,13 @@ def run_job(job_id: str, user_id: str, yupoo_url: str, destination: str, drive_t
         _update_job(job_id, total_images=total)
         _append_log(job_id, f"Found {total} images in album: {album_name}")
 
-        # Verifica créditos
         available = _get_user_credits(user_id)
         if available < 1:
             _update_job(job_id, status="failed")
             _append_log(job_id, "Insufficient credits.")
             return
 
-        # Cria pasta no Drive
+        # Create Drive folder
         folder_id = None
         if destination == "drive" and drive_token:
             root = _drive_create_folder(drive_token, "Yupoo Downloads")
@@ -273,12 +397,53 @@ def run_job(job_id: str, user_id: str, yupoo_url: str, destination: str, drive_t
             _update_job(job_id, drive_folder_id=folder_id)
             _append_log(job_id, f"Folder created in Drive: {album_name}")
 
-        session = requests.Session()
-        session.headers.update(HEADERS)
-        processed = failed = credits_used = 0
+        processed, failed, credits_used, stopped = _process_images(
+            job_id, user_id, images, destination, drive_token, folder_id
+        )
 
-        for i, img_url in enumerate(images):
-            # Checa cancelamento
+        if not stopped:
+            _update_job(job_id, status="completed")
+            _append_log(job_id, f"Completed. {processed} sent, {failed} failed.")
+
+    except Exception as e:
+        logger.error(f"Job {job_id} failed: {e}")
+        _update_job(job_id, status="failed")
+        _append_log(job_id, f"Critical error: {e}")
+
+
+def run_store_job(job_id: str, user_id: str, store_url: str, destination: str, drive_token: str):
+    """Download all albums from a Yupoo store."""
+    try:
+        _update_job(job_id, status="running")
+        _append_log(job_id, f"Scanning store: {store_url}")
+
+        albums, store_name = scrape_store_albums(store_url)
+
+        if len(albums) == 0:
+            _update_job(job_id, status="failed", log="No albums found in store.")
+            return
+
+        _append_log(job_id, f"Found {len(albums)} albums in store: {store_name}")
+
+        available = _get_user_credits(user_id)
+        if available < 1:
+            _update_job(job_id, status="failed")
+            _append_log(job_id, "Insufficient credits.")
+            return
+
+        # Create root Drive folder
+        root_folder = None
+        if destination == "drive" and drive_token:
+            root = _drive_create_folder(drive_token, "Yupoo Downloads")
+            root_folder = _drive_create_folder(drive_token, store_name, root)
+            _update_job(job_id, drive_folder_id=root_folder)
+            _append_log(job_id, f"Root folder created: {store_name}")
+
+        total_images_all = 0
+        albums_done = 0
+
+        for album in albums:
+            # Check cancellation
             conn = get_conn()
             status = conn.execute("SELECT status FROM jobs WHERE id = ?", (job_id,)).fetchone()["status"]
             conn.close()
@@ -286,46 +451,52 @@ def run_job(job_id: str, user_id: str, yupoo_url: str, destination: str, drive_t
                 _append_log(job_id, "Job cancelled by user.")
                 break
 
-            # Verifica créditos a cada imagem
+            # Check credits
             if _get_user_credits(user_id) < 1:
                 _append_log(job_id, "Credits exhausted — job paused.")
                 _update_job(job_id, status="paused")
                 return
 
-            fname = urlparse(img_url).path.split("/")[-1] or f"img_{i:04d}.jpg"
-            fname = re.sub(r'[\\/*?:"<>|]', "_", fname)
+            album_url = album["url"]
+            album_title = album["title"]
+            _append_log(job_id, f"[{albums_done+1}/{len(albums)}] Scraping: {album_title}")
 
             try:
-                r = session.get(img_url, timeout=30)
-                r.raise_for_status()
-                data = r.content
-                mime = "image/png" if fname.endswith(".png") else "image/jpeg"
+                images, album_name = scrape_album(album_url)
+                if not images:
+                    _append_log(job_id, f"  No images in {album_title}, skipping.")
+                    albums_done += 1
+                    continue
 
-                if destination == "drive" and folder_id:
-                    ok = _drive_upload(drive_token, data, fname, folder_id, mime)
-                    if ok:
-                        processed += 1
-                        credits_used += 1
-                        _deduct_credits(user_id, 1)
-                    else:
-                        failed += 1
-                        _append_log(job_id, f"Falha upload: {fname}")
-                else:
-                    processed += 1
-                    credits_used += 1
-                    _deduct_credits(user_id, 1)
+                total_images_all += len(images)
+                _update_job(job_id, total_images=total_images_all)
+                _append_log(job_id, f"  Found {len(images)} images")
+
+                # Create album subfolder
+                album_folder = None
+                if destination == "drive" and drive_token and root_folder:
+                    album_folder = _drive_create_folder(drive_token, album_name or album_title, root_folder)
+
+                processed, failed, credits_used, stopped = _process_images(
+                    job_id, user_id, images, destination, drive_token, album_folder
+                )
+
+                if stopped:
+                    return
+
+                albums_done += 1
+                _append_log(job_id, f"  Album done: {processed} images uploaded")
 
             except Exception as e:
-                failed += 1
-                _append_log(job_id, f"Erro: {fname} — {e}")
+                _append_log(job_id, f"  Error in album {album_title}: {e}")
+                albums_done += 1
 
-            _update_job(job_id, processed=processed, failed=failed, credits_used=credits_used)
-            time.sleep(0.3)
+            time.sleep(1)  # Pause between albums
 
         _update_job(job_id, status="completed")
-        _append_log(job_id, f"Completed. {processed} sent, {failed} failed.")
+        _append_log(job_id, f"Store completed. {albums_done}/{len(albums)} albums processed.")
 
     except Exception as e:
-        logger.error(f"Job {job_id} falhou: {e}")
+        logger.error(f"Store job {job_id} failed: {e}")
         _update_job(job_id, status="failed")
-        _append_log(job_id, f"Erro crítico: {e}")
+        _append_log(job_id, f"Critical error: {e}")

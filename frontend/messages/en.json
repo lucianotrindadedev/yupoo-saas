@@ -47,7 +47,7 @@
     "newJob": "New download",
     "history": "History ({amount})",
     "urlLabel": "Album Link",
-    "urlPlaceholder": "https://storename.x.yupoo.com/albums/12345",
+    "urlPlaceholder": "e.g. https://store.x.yupoo.com/albums or /albums/12345",
     "start": "Start download",
     "submitting": "Sending...",
     "noCredits": "You have no credits.",
@@ -56,7 +56,7 @@
     "noJobs": "No downloads yet.",
     "createFirst": "Create first download",
     "refresh": "Refresh",
-    "images_count": "{processed}/{total} images",
+    "images_count": "{processed} of {total} images",
     "credits_count": "{amount} credits",
     "status": {
       "pending": "Pending",

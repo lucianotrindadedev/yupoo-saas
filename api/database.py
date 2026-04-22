@@ -39,6 +39,7 @@ def init_db():
         yupoo_url       TEXT NOT NULL,
         status          TEXT DEFAULT 'pending',
         destination     TEXT DEFAULT 'drive',
+        job_type        TEXT DEFAULT 'album',
         drive_folder_id TEXT,
         total_images    INTEGER DEFAULT 0,
         processed       INTEGER DEFAULT 0,

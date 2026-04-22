@@ -10,6 +10,7 @@ interface Job {
   id: string; yupoo_url: string; status: string; destination: string;
   total_images: number; processed: number; failed: number;
   credits_used: number; created_at: number; log: string;
+  job_type?: string;
 }
 
 function StatusBadge({ status }: { status: string }) {
@@ -31,7 +32,10 @@ function JobCard({ job, onRefresh }: { job: Job; onRefresh: () => void }) {
     <div className="card" style={{ marginBottom: 12 }}>
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: 10 }}>
         <div>
-          <div style={{ fontWeight: 600, fontSize: 14, marginBottom: 2 }}>{url.hostname}{url.pathname}</div>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 2 }}>
+            <span style={{ fontWeight: 600, fontSize: 14 }}>{url.hostname}{url.pathname}</span>
+            {job.job_type === 'store' && <span style={{ fontSize: 10, padding: '2px 6px', borderRadius: 4, background: '#2d1f4e', color: '#b39dff', fontWeight: 600 }}>STORE</span>}
+          </div>
           <div style={{ fontSize: 12, color: 'var(--muted)' }}>
             {new Date(job.created_at * 1000).toLocaleString()} · {job.destination === 'drive' ? 'Google Drive' : 'Download'}
           </div>
@@ -175,7 +179,7 @@ export default function DashboardInner() {
             </p>
             <label style={{ fontSize: 13, color: 'var(--muted)', marginBottom: 6, display: 'block' }}>{t('urlLabel')}</label>
             <input value={url} onChange={e => setUrl(e.target.value)}
-              placeholder={t('urlPlaceholder')}
+              placeholder="https://store.x.yupoo.com/albums or /albums/12345"
               onKeyDown={e => e.key === 'Enter' && submit()} />
             {error && <p style={{ color: 'var(--danger)', fontSize: 13, marginTop: 8 }}>{error}</p>}
             <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginTop: '1rem' }}>
