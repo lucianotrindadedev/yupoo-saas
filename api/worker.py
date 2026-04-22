@@ -54,72 +54,158 @@ def _get_user_credits(user_id):
 
 # ─── Scraper Yupoo ───────────────────────────────────────────────────────────
 
-def _extract_images(html, base_url):
+def _extract_photo_ids_and_images(html, base_url):
+    """Extract photo IDs and image URLs from Yupoo album page."""
     soup = BeautifulSoup(html, "html.parser")
     images = []
+    photo_ids = []
     seen = set()
 
-    for img in soup.find_all("img"):
-        for attr in ("src", "data-src", "data-original", "data-lazy-src"):
-            val = img.get(attr, "")
-            if val and val.startswith("http") and any(
-                ext in val.lower() for ext in (".jpg", ".jpeg", ".png", ".webp")
-            ):
-                clean = re.sub(r'\?.*$', '', val)
-                clean = re.sub(r'_\d+x\d+\.', '.', clean)
-                if clean not in seen:
-                    seen.add(clean)
-                    images.append(clean)
-
+    # 1) Try to find image data in embedded JSON/JavaScript
     for script in soup.find_all("script"):
         text = script.string or ""
-        for m in re.findall(r'https?://[^\s"\'\\]+\.(?:jpg|jpeg|png|webp)', text):
+        # Look for photo.yupoo.com URLs in scripts
+        for m in re.findall(r'https?://photo\.yupoo\.com/[^"\s\'\\]+\.(?:jpg|jpeg|png|webp)', text):
             clean = re.sub(r'\?.*$', '', m)
             if clean not in seen:
                 seen.add(clean)
                 images.append(clean)
 
-    # Paginação
-    next_pages = []
+    # 2) Extract photo IDs from album children elements
+    for el in soup.find_all(attrs={"data-id": True}):
+        pid = el.get("data-id")
+        if pid and pid not in photo_ids:
+            photo_ids.append(pid)
+
+    # 3) Also look for photo links in href patterns like /12345678
     for a in soup.find_all("a", href=True):
         href = a["href"]
-        if re.search(r'[?&]page=\d+', href):
-            full = urljoin(base_url, href)
-            if full != base_url:
-                next_pages.append(full)
+        m = re.match(r'.*/(\d{6,})(?:\?.*)?$', href)
+        if m and "albums" not in href and "categories" not in href:
+            pid = m.group(1)
+            if pid not in photo_ids:
+                photo_ids.append(pid)
 
+    # 4) Find showalbum__children image containers
+    for div in soup.find_all(class_=re.compile(r'showalbum__children')):
+        # Check for background-image style
+        style = div.get("style", "")
+        bg_match = re.search(r'url\(["\']?(https?://[^"\')\s]+)["\']?\)', style)
+        if bg_match:
+            url = bg_match.group(1)
+            # Convert thumbnail to full-size
+            clean = re.sub(r'_\d+x\d+\.', '.', url)
+            clean = re.sub(r'\?.*$', '', clean)
+            if clean not in seen:
+                seen.add(clean)
+                images.append(clean)
+        # Check for img inside the container
+        img = div.find("img")
+        if img:
+            for attr in ("src", "data-src", "data-original", "data-lazy-src"):
+                val = img.get(attr, "")
+                if val and "photo.yupoo.com" in val:
+                    clean = re.sub(r'_\d+x\d+\.', '.', val)
+                    clean = re.sub(r'\?.*$', '', clean)
+                    if clean not in seen:
+                        seen.add(clean)
+                        images.append(clean)
+
+    # 5) Fallback: any img with photo.yupoo.com in src
+    for img in soup.find_all("img"):
+        for attr in ("src", "data-src", "data-original", "data-lazy-src"):
+            val = img.get(attr, "")
+            if val and "photo.yupoo.com" in val:
+                clean = re.sub(r'_\d+x\d+\.', '.', val)
+                clean = re.sub(r'\?.*$', '', clean)
+                if clean not in seen:
+                    seen.add(clean)
+                    images.append(clean)
+
+    # Get album title
     title_el = soup.find("h1") or soup.find("title")
     album_name = title_el.get_text(strip=True) if title_el else "album"
     album_name = re.sub(r'[\\/*?:"<>|]', "_", album_name)[:60].strip()
+    # Remove common Yupoo suffixes
+    album_name = re.sub(r'\s*\|\s*相册.*$', '', album_name).strip()
 
-    return images, album_name, list(set(next_pages))
+    return images, photo_ids, album_name
+
+
+def _get_image_from_photo_page(session, photo_url):
+    """Visit individual photo page and extract full-resolution image URL."""
+    try:
+        r = session.get(photo_url, timeout=20)
+        r.raise_for_status()
+        soup = BeautifulSoup(r.text, "html.parser")
+
+        # Look for original image link
+        for a in soup.find_all("a", href=True):
+            href = a["href"]
+            if "photo.yupoo.com" in href and any(
+                ext in href.lower() for ext in (".jpg", ".jpeg", ".png", ".webp")
+            ):
+                return re.sub(r'\?.*$', '', href)
+
+        # Look in img tags
+        for img in soup.find_all("img"):
+            for attr in ("src", "data-src", "data-original"):
+                val = img.get(attr, "")
+                if val and "photo.yupoo.com" in val and any(
+                    ext in val.lower() for ext in (".jpg", ".jpeg", ".png", ".webp")
+                ):
+                    clean = re.sub(r'_\d+x\d+\.', '.', val)
+                    return re.sub(r'\?.*$', '', clean)
+
+        # Look in scripts
+        for script in soup.find_all("script"):
+            text = script.string or ""
+            matches = re.findall(r'https?://photo\.yupoo\.com/[^"\s\'\\]+\.(?:jpg|jpeg|png|webp)', text)
+            if matches:
+                return re.sub(r'\?.*$', '', matches[0])
+
+    except Exception as e:
+        logger.warning(f"Failed to fetch photo page {photo_url}: {e}")
+    return None
+
 
 def scrape_album(start_url):
     session = requests.Session()
     session.headers.update(HEADERS)
-    all_images, album_name = [], "album"
-    visited, queue = set(), [start_url]
+    all_images = []
+    album_name = "album"
+    seen = set()
 
-    while queue:
-        url = queue.pop(0)
-        if url in visited:
-            continue
-        visited.add(url)
-        try:
-            r = session.get(url, timeout=20)
-            r.raise_for_status()
-            imgs, name, next_pages = _extract_images(r.text, url)
-            if album_name == "album":
-                album_name = name
-            new = [i for i in imgs if i not in all_images]
-            all_images.extend(new)
-            for p in next_pages:
-                if p not in visited:
-                    queue.append(p)
-            time.sleep(0.6)
-        except Exception as e:
-            logger.warning(f"Erro ao scrape {url}: {e}")
+    # Parse the base store URL from the album URL
+    parsed = urlparse(start_url)
+    base_store = f"{parsed.scheme}://{parsed.netloc}"
 
+    try:
+        r = session.get(start_url, timeout=20)
+        r.raise_for_status()
+        images, photo_ids, album_name = _extract_photo_ids_and_images(r.text, start_url)
+
+        # Add directly found images
+        for img in images:
+            if img not in seen:
+                seen.add(img)
+                all_images.append(img)
+
+        logger.info(f"Direct images found: {len(images)}, Photo IDs found: {len(photo_ids)}")
+
+        # For each photo ID, visit the detail page to get full-res URL
+        for pid in photo_ids:
+            photo_url = f"{base_store}/{pid}?uid=1"
+            img_url = _get_image_from_photo_page(session, photo_url)
+            if img_url and img_url not in seen:
+                seen.add(img_url)
+                all_images.append(img_url)
+            time.sleep(0.4)
+
+    except Exception as e:
+        logger.error(f"Error scraping album {start_url}: {e}")
+
+    logger.info(f"Total images found: {len(all_images)} for album: {album_name}")
     return all_images, album_name
 
 # ─── Google Drive helpers ─────────────────────────────────────────────────────
