@@ -30,7 +30,7 @@ def _update_job(job_id, **kwargs):
 def _append_log(job_id, msg):
     conn = get_conn()
     conn.execute(
-        "UPDATE jobs SET log = log || ?, updated_at = ? WHERE id = ?",
+        "UPDATE jobs SET log = COALESCE(log, '') || ?, updated_at = ? WHERE id = ?",
         (f"{msg}\n", int(time.time()), job_id)
     )
     conn.commit()
