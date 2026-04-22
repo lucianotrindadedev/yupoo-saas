@@ -93,12 +93,19 @@ def _extract_photo_ids_and_images(html, base_url):
         text = script.string or ""
         if "JSON.parse" in text:
             try:
-                match = re.search(r'JSON\.parse\("(.+?)"\)', text)
+                # Aceita tanto aspas simples (') quanto duplas (")
+                match = re.search(r'JSON\.parse\([\'"](.+?)[\'"]\)', text)
                 if match:
+                    raw_content = match.group(1)
                     # Desescapa o JSON (Yupoo escapa aspas no JS)
-                    raw_json = match.group(1).replace('\\"', '"').replace('\\\\', '\\')
+                    raw_json = raw_content.replace('\\"', '"').replace("\\'", "'").replace('\\\\', '\\')
                     data = json.loads(raw_json)
                     photos = data.get("album", {}).get("photos", [])
+                    
+                    if not photos:
+                        logger.warning("JSON encontrado mas não contém fotos.")
+                        continue
+                        
                     for p in photos:
                         # Prioridade: Original > Big > Padrão
                         url = p.get("origin_src") or p.get("big_src") or p.get("src")
@@ -113,7 +120,8 @@ def _extract_photo_ids_and_images(html, base_url):
                         if is_valid_yupoo_image(clean_url, title) and photo_id not in seen_ids:
                             seen_ids.add(photo_id)
                             images.append(clean_url)
-            except: pass
+            except Exception as e:
+                logger.debug(f"Falha ao processar JSON: {e}")
 
     # ESTRATÉGIA 2: Photo IDs para visita de páginas de detalhes (Fallback)
     # Procura por links que levam para a página individual da foto
