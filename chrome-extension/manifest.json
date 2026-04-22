@@ -4,16 +4,26 @@
   "version": "1.0.0",
   "description": "Baixe álbuns completos da Yupoo direto para o Google Drive com 1 clique.",
   "permissions": ["activeTab", "storage"],
-  "host_permissions": ["https://*.yupoo.com/*", "https://*.x.yupoo.com/*"],
+  "host_permissions": [
+    "https://*.yupoo.com/*", 
+    "https://*.x.yupoo.com/*",
+    "https://yupoodownloader.online/*"
+  ],
   "action": {
-    "default_popup": "popup.html",
-    "default_icon": { "48": "icon48.png" }
+    "default_popup": "popup.html"
   },
-  "icons": { "48": "icon48.png", "128": "icon128.png" },
   "content_scripts": [
     {
-      "matches": ["https://*.yupoo.com/*", "https://*.x.yupoo.com/*"],
+      "matches": [
+        "https://*.yupoo.com/*", 
+        "https://*.x.yupoo.com/*"
+      ],
       "js": ["content.js"],
+      "run_at": "document_idle"
+    },
+    {
+      "matches": ["https://yupoodownloader.online/*"],
+      "js": ["auth_bridge.js"],
       "run_at": "document_idle"
     }
   ]
