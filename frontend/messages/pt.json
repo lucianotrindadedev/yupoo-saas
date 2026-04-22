@@ -38,6 +38,7 @@
   },
   "Dashboard": {
     "title": "Dashboard",
+    "subtitle": "Cole o link do álbum e baixe as imagens para o Google Drive.",
     "credits": "Créditos",
     "credits_plural": "créditos",
     "available": "disponível",

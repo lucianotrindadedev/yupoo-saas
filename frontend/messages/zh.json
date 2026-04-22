@@ -38,6 +38,7 @@
   },
   "Dashboard": {
     "title": "仪表板",
+    "subtitle": "粘贴相册链接，将图片下载到 Google Drive。",
     "credits": "积分",
     "credits_plural": "个积分",
     "available": "可用",

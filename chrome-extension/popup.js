@@ -1,5 +1,5 @@
-const API_URL = 'https://seudominio.com/api'  // ← altere para seu domínio
-const SITE    = 'https://seudominio.com'
+const API_URL = 'https://yupoodownloader.online/api'  // ← altere para seu domínio
+const SITE = 'https://yupoodownloader.online'
 
 const $ = id => document.getElementById(id)
 
@@ -58,8 +58,8 @@ async function pollJob(token, jobId) {
 
 async function init() {
   // Links de rodapé
-  $('dashLink').href    = `${SITE}/dashboard`
-  $('buyLink').href     = `${SITE}/pricing`
+  $('dashLink').href = `${SITE}/dashboard`
+  $('buyLink').href = `${SITE}/pricing`
   $('pricingLink').href = `${SITE}/pricing`
 
   // Verifica se está em página Yupoo

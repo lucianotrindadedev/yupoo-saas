@@ -38,6 +38,7 @@
   },
   "Dashboard": {
     "title": "Panel de Control",
+    "subtitle": "Pega el enlace del álbum y descarga las imágenes a Google Drive.",
     "credits": "Créditos",
     "credits_plural": "créditos",
     "available": "disponible",

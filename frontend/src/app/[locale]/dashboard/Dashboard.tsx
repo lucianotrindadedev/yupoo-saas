@@ -171,7 +171,7 @@ export default function DashboardInner() {
           <div className="card">
             <h2 style={{ fontWeight: 700, fontSize: 18, marginBottom: 4 }}>{t('newJob')}</h2>
             <p style={{ fontSize: 14, color: 'var(--muted)', marginBottom: '1.25rem' }}>
-              {t('Index.subtitle')}
+              {t('subtitle')}
             </p>
             <label style={{ fontSize: 13, color: 'var(--muted)', marginBottom: 6, display: 'block' }}>{t('urlLabel')}</label>
             <input value={url} onChange={e => setUrl(e.target.value)}
