@@ -1,7 +1,7 @@
 {
   "manifest_version": 3,
   "name": "Yupoo Downloader",
-  "version": "1.0.0",
+  "version": "1.0.1",
   "description": "Baixe álbuns completos da Yupoo direto para o Google Drive com 1 clique.",
   "permissions": ["activeTab", "storage", "scripting"],
   "host_permissions": [

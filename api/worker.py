@@ -59,9 +59,13 @@ def is_valid_yupoo_image(url, title=""):
         return False
     u = url.lower()
     t = (title or "").lower()
-    blacklist = ["big.jpg", "medium.jpg", "small.jpg", "square.jpg", "thumb", "logo", "banner", "static", "placeholder", "size", "chart"]
-    if any(w in u or w in t for w in blacklist): return False
+    # Rejeita miniaturas e imagens de UI
+    blacklist = ["medium.jpg", "small.jpg", "square.jpg", "thumb", "logo", "banner", "static", "placeholder", "size", "chart"]
+    if any(w in u for w in blacklist): return False
     if any(f"/{w}/" in u for w in ["small", "medium", "square", "thumb"]): return False
+    # "size" ou "chart" no título indica tabela de medidas (não queremos)
+    if any(w in t for w in ["size chart", "tabela de medidas"]):
+        return False
     return True
 
 def _extract_photo_ids_and_images(html, base_url):
@@ -69,53 +73,71 @@ def _extract_photo_ids_and_images(html, base_url):
     images = []
     photo_ids = []
     seen_ids = set()
-    
+
     # Nome do álbum
-    title_el = soup.find("span", class_="showalbum_title") or soup.find("h1") or soup.find("title")
+    title_el = soup.find("span", class_="showalbum__title") or soup.find("span", class_="showalbum_title") or soup.find("h1") or soup.find("title")
     album_name = title_el.get_text(strip=True) if title_el else "album"
     album_name = re.sub(r'[\\/*?:"<>|]', "_", album_name)[:60].strip()
 
-    # Estratégia JSON
-    for script in soup.find_all("script"):
-        text = script.get_text()
-        if "JSON.parse" in text:
-            try:
-                # Regex mais flexível para capturar o conteúdo do JSON.parse
-                match = re.search(r'JSON\.parse\([\'"](.+?)[\'"]\)', text, re.DOTALL)
-                if match:
-                    raw_content = match.group(1)
-                    # Limpeza profunda do JSON escapado
-                    raw_json = raw_content.replace('\\"', '"').replace("\\'", "'").replace('\\\\', '\\')
-                    
-                    # Remove escapes extras de barras que a Yupoo coloca
-                    raw_json = raw_json.replace('\\/', '/')
-                    
-                    data = json.loads(raw_json)
-                    photos = data.get("album", {}).get("photos", [])
-                    
-                    if photos:
+    def _add_image(url, title=""):
+        if not url:
+            return
+        if url.startswith("//"):
+            url = "https:" + url
+        clean_url = re.sub(r'\?.*$', '', url)
+        photo_id = clean_url.split("/")[-2] if "/" in clean_url else clean_url
+        if is_valid_yupoo_image(clean_url, title) and photo_id not in seen_ids:
+            seen_ids.add(photo_id)
+            images.append(clean_url)
+
+    # Estratégia 1: atributos HTML diretos (formato atual da Yupoo 2024+)
+    # As imagens ficam em <img data-origin-src="..." data-src="...">
+    for img in soup.find_all("img"):
+        # data-origin-src = imagem original (melhor qualidade)
+        origin = img.get("data-origin-src") or img.get("data-origin")
+        big = img.get("data-src")
+        alt = img.get("alt", "")
+        _add_image(origin or big, alt)
+
+    # Estratégia 2: links <a> com imagens de alta resolução
+    for a in soup.find_all("a", href=True):
+        href = a["href"]
+        if "photo.yupoo.com" in href:
+            _add_image(href)
+
+    # Estratégia 3 (legado): JSON.parse embutido
+    if not images:
+        for script in soup.find_all("script"):
+            text = script.get_text()
+            if "JSON.parse" in text:
+                try:
+                    match = re.search(r'JSON\.parse\([\'"](.+?)[\'"]\)', text, re.DOTALL)
+                    if match:
+                        raw_content = match.group(1)
+                        raw_json = raw_content.replace('\\"', '"').replace("\\'", "'").replace('\\\\', '\\')
+                        raw_json = raw_json.replace('\\/', '/')
+                        data = json.loads(raw_json)
+                        photos = data.get("album", {}).get("photos", [])
                         for p in photos:
                             url = p.get("origin_src") or p.get("big_src") or p.get("src")
-                            if not url: continue
-                            if url.startswith("//"): url = "https:" + url
-                            
-                            clean_url = re.sub(r'\?.*$', '', url)
-                            photo_id = clean_url.split("/")[-2] if "/" in clean_url else clean_url
-                            
-                            if is_valid_yupoo_image(clean_url, p.get("title", "")) and photo_id not in seen_ids:
-                                seen_ids.add(photo_id)
-                                images.append(clean_url)
-            except Exception as e:
-                logger.debug(f"JSON Parse fail: {e}")
+                            _add_image(url, p.get("title", ""))
+                except Exception as e:
+                    logger.debug(f"JSON Parse fail: {e}")
 
-    # Fallback IDs
+    # Fallback IDs (para modo de compatibilidade)
     for a in soup.find_all("a", href=True):
         if "/photos/" in a["href"]:
             parts = a["href"].split("/")
-            # /photos/username/12345/
             for p in parts:
                 if p.isdigit() and len(p) > 5:
-                    if p not in photo_ids: photo_ids.append(p)
+                    if p not in photo_ids:
+                        photo_ids.append(p)
+
+    # Também coleta IDs de elementos com data-photoid / data-id
+    for el in soup.find_all(attrs={"data-photoid": True}):
+        pid = el.get("data-photoid")
+        if pid and pid.isdigit() and pid not in photo_ids:
+            photo_ids.append(pid)
 
     return images, photo_ids, album_name
 

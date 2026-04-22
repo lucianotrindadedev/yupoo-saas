@@ -53,14 +53,48 @@ async function startJob(token, driveToken, url) {
     const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
     const [{ result }] = await chrome.scripting.executeScript({
       target: { tabId: tab.id },
-      world: 'MAIN', // <--- MÁGICA ACONTECE AQUI (Permite ler variáveis da página)
+      world: 'MAIN', // Permite ler variáveis da página
       func: () => {
-        const data = window.pageData;
-        if (data && data.album && data.album.photos) {
-          // Extrai os links de alta resolução
-          return data.album.photos.map(p => p.origin_src || p.big_src || p.src);
-        }
-        return [];
+        const out = new Set();
+        const norm = (u) => {
+          if (!u) return null;
+          if (u.startsWith('//')) u = 'https:' + u;
+          return u.split('?')[0];
+        };
+        const isValid = (u) => {
+          if (!u || !u.includes('photo.yupoo.com')) return false;
+          const low = u.toLowerCase();
+          // Rejeita miniaturas
+          if (/\/(small|medium|square|thumb)\//.test(low)) return false;
+          if (/\/(medium|small|square)\.jpg$/.test(low)) return false;
+          if (low.includes('logo') || low.includes('banner') || low.includes('placeholder')) return false;
+          return true;
+        };
+
+        // Estratégia 1: window.pageData (formato antigo)
+        try {
+          const data = window.pageData;
+          if (data && data.album && Array.isArray(data.album.photos)) {
+            data.album.photos.forEach(p => {
+              const u = norm(p.origin_src || p.big_src || p.src);
+              if (isValid(u)) out.add(u);
+            });
+          }
+        } catch (_) {}
+
+        // Estratégia 2: DOM — data-origin-src / data-src (formato atual)
+        document.querySelectorAll('img[data-origin-src], img[data-src]').forEach(img => {
+          const u = norm(img.getAttribute('data-origin-src') || img.getAttribute('data-src'));
+          if (isValid(u)) out.add(u);
+        });
+
+        // Estratégia 3: links <a> apontando para photo.yupoo.com
+        document.querySelectorAll('a[href*="photo.yupoo.com"]').forEach(a => {
+          const u = norm(a.getAttribute('href'));
+          if (isValid(u)) out.add(u);
+        });
+
+        return Array.from(out);
       }
     });
     images = result || [];
