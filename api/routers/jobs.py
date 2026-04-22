@@ -53,7 +53,7 @@ def list_jobs(request: Request):
     conn = get_conn()
     rows = conn.execute(
         """SELECT id, yupoo_url, status, destination, total_images, processed, failed,
-                  credits_used, created_at, updated_at, job_type
+                  credits_used, created_at, updated_at, job_type, log
            FROM jobs WHERE user_id = ? ORDER BY created_at DESC LIMIT 50""",
         (user["id"],)
     ).fetchall()
