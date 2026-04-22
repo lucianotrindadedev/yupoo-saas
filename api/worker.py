@@ -2,7 +2,7 @@
 Worker: baixa imagens da Yupoo e envia para o Google Drive do usuário.
 Roda em background thread via FastAPI BackgroundTasks.
 """
-import re, time, uuid, requests, io
+import re, time, uuid, requests, io, json
 from urllib.parse import urljoin, urlparse
 from bs4 import BeautifulSoup
 from database import get_conn
@@ -52,186 +52,144 @@ def _get_user_credits(user_id):
     conn.close()
     return row["credits"] if row else 0
 
-# ─── Scraper Yupoo ───────────────────────────────────────────────────────────
+# ─── Scraper Yupoo (Lógica Premium baseada em yupoo-downloader) ───────────────
+
+def is_valid_yupoo_image(url, title=""):
+    """Filtra imagens indesejadas, variações de tamanho e lixo."""
+    if not url or "photo.yupoo.com" not in url:
+        return False
+    
+    url_l = url.lower()
+    title_l = (title or "").lower()
+    
+    # Blacklist de termos e variações
+    blacklist = [
+        "big.jpg", "medium.jpg", "small.jpg", "square.jpg", "thumb", 
+        "logo", "banner", "static", "placeholder", "size", "chart", "icon"
+    ]
+    if any(word in url_l or word in title_l for word in blacklist):
+        return False
+        
+    # Bloqueia pastas de thumbnails explicitamente
+    if any(f"/{w}/" in url_l for w in ["small", "medium", "square", "thumb"]):
+        return False
+        
+    return True
 
 def _extract_photo_ids_and_images(html, base_url):
-    """Extract photo IDs and image URLs from Yupoo album page."""
+    """Extrai IDs de fotos e URLs de imagens de alta resolução."""
     soup = BeautifulSoup(html, "html.parser")
     images = []
     photo_ids = []
-    seen = set()
-
-    # 1) Try to find image data in embedded JSON/JavaScript
-    for script in soup.find_all("script"):
-        text = script.string or ""
-        # Look for photo.yupoo.com URLs in scripts
-        for m in re.findall(r'https?://photo\.yupoo\.com/[^"\s\'\\]+\.(?:jpg|jpeg|png|webp)', text):
-            clean = re.sub(r'\?.*$', '', m)
-            if clean not in seen:
-                seen.add(clean)
-                images.append(clean)
-
-    # 2) Extract photo IDs from album children elements
-    for el in soup.find_all(attrs={"data-id": True}):
-        pid = el.get("data-id")
-        if pid and pid not in photo_ids:
-            photo_ids.append(pid)
-
-    # 3) Also look for photo links in href patterns like /12345678
-    for a in soup.find_all("a", href=True):
-        href = a["href"]
-        m = re.match(r'.*/(\d{6,})(?:\?.*)?$', href)
-        if m and "albums" not in href and "categories" not in href:
-            pid = m.group(1)
-            if pid not in photo_ids:
-                photo_ids.append(pid)
-
-    # 4) Find showalbum__children image containers
-    for div in soup.find_all(class_=re.compile(r'showalbum__children')):
-        # Check for background-image style
-        style = div.get("style", "")
-        bg_match = re.search(r'url\(["\']?(https?://[^"\')\s]+)["\']?\)', style)
-        if bg_match:
-            url = bg_match.group(1)
-            # Convert thumbnail to full-size
-            clean = re.sub(r'_\d+x\d+\.', '.', url)
-            clean = re.sub(r'\?.*$', '', clean)
-            if clean not in seen:
-                seen.add(clean)
-                images.append(clean)
-        # Check for img inside the container
-        img = div.find("img")
-        if img:
-            for attr in ("src", "data-src", "data-original", "data-lazy-src"):
-                val = img.get(attr, "")
-                if val and "photo.yupoo.com" in val:
-                    clean = re.sub(r'_\d+x\d+\.', '.', val)
-                    clean = re.sub(r'\?.*$', '', clean)
-                    if clean not in seen:
-                        seen.add(clean)
-                        images.append(clean)
-
-    # 5) Fallback: any img with photo.yupoo.com in src
-    for img in soup.find_all("img"):
-        for attr in ("src", "data-src", "data-original", "data-lazy-src"):
-            val = img.get(attr, "")
-            if val and "photo.yupoo.com" in val:
-                clean = re.sub(r'_\d+x\d+\.', '.', val)
-                clean = re.sub(r'\?.*$', '', clean)
-                if clean not in seen:
-                    seen.add(clean)
-                    images.append(clean)
-
-    # Get album title
-    title_el = soup.find("h1") or soup.find("title")
+    seen_ids = set() # photo_id deduplication
+    
+    # Nome do álbum
+    title_el = soup.find("span", class_="showalbum_title") or soup.find("h1") or soup.find("title")
     album_name = title_el.get_text(strip=True) if title_el else "album"
     album_name = re.sub(r'[\\/*?:"<>|]', "_", album_name)[:60].strip()
-    # Remove common Yupoo suffixes
-    album_name = re.sub(r'\s*\|\s*相册.*$', '', album_name).strip()
+
+    # ESTRATÉGIA 1: Extração via JSON.parse (O Segredo da Qualidade)
+    for script in soup.find_all("script"):
+        text = script.string or ""
+        if "JSON.parse" in text:
+            try:
+                match = re.search(r'JSON\.parse\("(.+?)"\)', text)
+                if match:
+                    # Desescapa o JSON (Yupoo escapa aspas no JS)
+                    raw_json = match.group(1).replace('\\"', '"').replace('\\\\', '\\')
+                    data = json.loads(raw_json)
+                    photos = data.get("album", {}).get("photos", [])
+                    for p in photos:
+                        # Prioridade: Original > Big > Padrão
+                        url = p.get("origin_src") or p.get("big_src") or p.get("src")
+                        title = p.get("title", "")
+                        if not url: continue
+                        if url.startswith("//"): url = "https:" + url
+                        
+                        clean_url = re.sub(r'\?.*$', '', url)
+                        # ID único da foto no path (ex: d223daef)
+                        photo_id = clean_url.split("/")[-2] if "/" in clean_url else clean_url
+                        
+                        if is_valid_yupoo_image(clean_url, title) and photo_id not in seen_ids:
+                            seen_ids.add(photo_id)
+                            images.append(clean_url)
+            except: pass
+
+    # ESTRATÉGIA 2: Photo IDs para visita de páginas de detalhes (Fallback)
+    # Procura por links que levam para a página individual da foto
+    for a in soup.find_all("a", href=True):
+        href = a["href"]
+        # Pattern: /photos/username/albums/id/
+        if "/photos/" in href:
+            parts = href.split("/")
+            if len(parts) > 2:
+                pid = parts[2]
+                if pid not in photo_ids:
+                    photo_ids.append(pid)
 
     return images, photo_ids, album_name
 
-
 def _get_image_from_photo_page(session, photo_url):
-    """Visit individual photo page and extract full-resolution image URL."""
+    """Extrai a imagem original da página de detalhes da foto."""
     try:
-        r = session.get(photo_url, timeout=20)
-        r.raise_for_status()
+        r = session.get(photo_url, timeout=15)
+        if not r.ok: return None
         soup = BeautifulSoup(r.text, "html.parser")
-
-        # Look for original image link
+        
+        # Procura links de 'imagem original'
         for a in soup.find_all("a", href=True):
             href = a["href"]
-            if "photo.yupoo.com" in href and any(
-                ext in href.lower() for ext in (".jpg", ".jpeg", ".png", ".webp")
-            ):
+            if "photo.yupoo.com" in href and is_valid_yupoo_image(href):
                 return re.sub(r'\?.*$', '', href)
 
-        # Look in img tags
-        for img in soup.find_all("img"):
-            for attr in ("src", "data-src", "data-original"):
-                val = img.get(attr, "")
-                if val and "photo.yupoo.com" in val and any(
-                    ext in val.lower() for ext in (".jpg", ".jpeg", ".png", ".webp")
-                ):
-                    clean = re.sub(r'_\d+x\d+\.', '.', val)
-                    return re.sub(r'\?.*$', '', clean)
-
-        # Look in scripts
-        for script in soup.find_all("script"):
-            text = script.string or ""
-            matches = re.findall(r'https?://photo\.yupoo\.com/[^"\s\'\\]+\.(?:jpg|jpeg|png|webp)', text)
-            if matches:
-                return re.sub(r'\?.*$', '', matches[0])
-
+        # Procura tags img com alta resolução
+        for img in soup.find_all("img", src=True):
+            src = img["src"]
+            if is_valid_yupoo_image(src):
+                return re.sub(r'\?.*$', '', src)
+                
     except Exception as e:
-        logger.warning(f"Failed to fetch photo page {photo_url}: {e}")
+        logger.warning(f"Falha ao processar página de foto {photo_url}: {e}")
     return None
 
-
 def scrape_album(start_url):
+    """Função principal de scraping de álbum."""
     session = requests.Session()
     session.headers.update(HEADERS)
     all_images = []
-    album_name = "album"
     seen = set()
-
-    # Parse the base store URL from the album URL
+    
     parsed = urlparse(start_url)
     base_store = f"{parsed.scheme}://{parsed.netloc}"
 
     try:
-        r = session.get(start_url, timeout=20)
+        r = session.get(start_url, timeout=25)
         r.raise_for_status()
         images, photo_ids, album_name = _extract_photo_ids_and_images(r.text, start_url)
 
-        # Add directly found images
+        # 1. Adiciona imagens encontradas via JSON (mais rápido e melhor)
         for img in images:
             if img not in seen:
                 seen.add(img)
                 all_images.append(img)
 
-        logger.info(f"Direct images found: {len(images)}, Photo IDs found: {len(photo_ids)}")
-
-        # For each photo ID, visit the detail page to get full-res URL
-        for pid in photo_ids:
-            photo_url = f"{base_store}/{pid}?uid=1"
-            img_url = _get_image_from_photo_page(session, photo_url)
-            if img_url and img_url not in seen:
-                seen.add(img_url)
-                all_images.append(img_url)
-            
-            # High-res images on Yupoo are usually hex-like IDs (e.g., 01e91c86.jpg)
-            # We strictly filter out generic names and thumbnails
-            soup = BeautifulSoup(r.text, "html.parser")
-            for img in soup.find_all("img", src=True):
-                src = img["src"]
-                if "photo.yupoo.com" in src:
-                    # 1. REMOVE any query strings to get clean filename
-                    clean_src = src.split("?")[0]
-                    fname = clean_src.split("/")[-1].lower()
-                    
-                    # 2. BLACKLIST: If it contains these words anywhere in the path/name, skip it
-                    blacklist = ["big.jpg", "medium.jpg", "small.jpg", "square.jpg", "thumb", "logo", "icon", "static"]
-                    if any(word in src.lower() for word in blacklist):
-                        continue
-                    
-                    # 3. WHITELIST: The high-res image usually has a long unique ID (hexadecimal)
-                    # We only want files that look like an ID (at least 6 characters of hex/random stuff)
-                    # and definitely not "big.jpg"
-                    if len(fname.split('.')[0]) < 6:
-                        continue
-
-                    img_url = urljoin("https:", src) if src.startswith("//") else src
-                    if img_url and img_url not in seen:
-                        seen.add(img_url)
-                        all_images.append(img_url)
-            time.sleep(0.4)
-
+        # 2. Se não achou imagens mas achou IDs, visita as páginas de detalhes
+        # Ou se a quantidade de fotos encontradas via JSON for menor que a de IDs
+        if len(all_images) < len(photo_ids):
+            for pid in photo_ids:
+                # Verifica se já temos essa foto pelo ID dela contido na URL
+                if any(pid in img for img in all_images): continue
+                
+                photo_url = f"{base_store}/photos/{pid}/?uid=1"
+                img_url = _get_image_from_photo_page(session, photo_url)
+                if img_url and img_url not in seen:
+                    seen.add(img_url)
+                    all_images.append(img_url)
+                time.sleep(0.4)
+                
     except Exception as e:
-        logger.error(f"Error scraping album {start_url}: {e}")
+        logger.error(f"Erro ao escaneal álbum {start_url}: {e}")
 
-    logger.info(f"Total images found: {len(all_images)} for album: {album_name}")
     return all_images, album_name
 
 # ─── Store Scraper ────────────────────────────────────────────────────────────
@@ -265,17 +223,16 @@ def scrape_store_albums(store_url):
                     if album_id not in seen:
                         seen.add(album_id)
                         full_url = urljoin(base, f"/albums/{album_id}?uid=1")
-                        # Try to get album title from the link text or nearby element
                         title = a.get_text(strip=True) or f"Album {album_id}"
                         title = re.sub(r'[\\/*?:"<>|]', "_", title)[:60].strip()
                         albums.append({"url": full_url, "title": title, "id": album_id})
                         found += 1
 
             if found == 0:
-                break  # No more albums on this page
+                break
 
             page += 1
-            time.sleep(0.8)
+            time.sleep(1)
 
         except Exception as e:
             logger.warning(f"Error scraping store page {page}: {e}")
@@ -292,9 +249,7 @@ def scrape_store_albums(store_url):
     except:
         store_name = parsed.netloc.split(".")[0]
 
-    logger.info(f"Store '{store_name}': found {len(albums)} albums")
     return albums, store_name
-
 
 # ─── Google Drive helpers ─────────────────────────────────────────────────────
 
@@ -311,7 +266,6 @@ def _drive_create_folder(drive_token, name, parent_id=None):
 
 def _drive_upload(drive_token, data, filename, folder_id, mime="image/jpeg"):
     meta = {"name": filename, "parents": [folder_id]}
-    import json
     boundary = "yupoo_boundary"
     body = (
         f"--{boundary}\r\nContent-Type: application/json\r\n\r\n"
@@ -334,15 +288,12 @@ def _drive_upload(drive_token, data, filename, folder_id, mime="image/jpeg"):
 def _process_images(job_id, user_id, images, destination, drive_token, folder_id, yupoo_url=None):
     """Shared logic: download and upload images for a job."""
     session = requests.Session()
-    # IMPORTANT: Yupoo requires Referer to allow image downloads
     referer = yupoo_url or "https://x.yupoo.com/"
     session.headers.update({**HEADERS, "Referer": referer})
     
     processed = failed = credits_used = 0
-    # Track images since last credit deduction
     images_in_current_batch = 0
 
-    # Get current progress (for store jobs that process multiple albums)
     conn = get_conn()
     row = conn.execute("SELECT processed, failed, credits_used FROM jobs WHERE id = ?", (job_id,)).fetchone()
     conn.close()
@@ -350,11 +301,9 @@ def _process_images(job_id, user_id, images, destination, drive_token, folder_id
         processed = row["processed"]
         failed = row["failed"]
         credits_used = row["credits_used"]
-        # Resume batch counter based on total processed
         images_in_current_batch = processed % 10
 
     for i, img_url in enumerate(images):
-        # Check cancellation
         conn = get_conn()
         status = conn.execute("SELECT status FROM jobs WHERE id = ?", (job_id,)).fetchone()["status"]
         conn.close()
@@ -362,7 +311,6 @@ def _process_images(job_id, user_id, images, destination, drive_token, folder_id
             _append_log(job_id, "Job cancelled by user.")
             return processed, failed, credits_used, True
 
-        # Check credits: only if we are about to start a NEW batch of 10
         if images_in_current_batch == 0:
             if _get_user_credits(user_id) < 1:
                 _append_log(job_id, "Credits exhausted — job paused.")
@@ -373,7 +321,6 @@ def _process_images(job_id, user_id, images, destination, drive_token, folder_id
         fname = re.sub(r'[\\/*?:"<>|]', "_", fname)
 
         try:
-            # Re-verify referer just in case
             r = session.get(img_url, timeout=30)
             r.raise_for_status()
             data = r.content
@@ -384,7 +331,6 @@ def _process_images(job_id, user_id, images, destination, drive_token, folder_id
                 if ok:
                     processed += 1
                     images_in_current_batch += 1
-                    # Deduct 1 credit for every 10 images
                     if images_in_current_batch >= 10:
                         _deduct_credits(user_id, 1)
                         credits_used += 1
@@ -405,7 +351,7 @@ def _process_images(job_id, user_id, images, destination, drive_token, folder_id
             _append_log(job_id, f"Error: {fname} — {e}")
 
         _update_job(job_id, processed=processed, failed=failed, credits_used=credits_used)
-        time.sleep(0.3)
+        time.sleep(0.4)
 
     return processed, failed, credits_used, False
 
@@ -431,7 +377,6 @@ def run_job(job_id: str, user_id: str, yupoo_url: str, destination: str, drive_t
             _append_log(job_id, "Insufficient credits.")
             return
 
-        # Create Drive folder
         folder_id = None
         if destination == "drive" and drive_token:
             root = _drive_create_folder(drive_token, "Yupoo Downloads")
@@ -473,7 +418,6 @@ def run_store_job(job_id: str, user_id: str, store_url: str, destination: str, d
             _append_log(job_id, "Insufficient credits.")
             return
 
-        # Create root Drive folder
         root_folder = None
         if destination == "drive" and drive_token:
             root = _drive_create_folder(drive_token, "Yupoo Downloads")
@@ -485,7 +429,6 @@ def run_store_job(job_id: str, user_id: str, store_url: str, destination: str, d
         albums_done = 0
 
         for album in albums:
-            # Check cancellation
             conn = get_conn()
             status = conn.execute("SELECT status FROM jobs WHERE id = ?", (job_id,)).fetchone()["status"]
             conn.close()
@@ -493,7 +436,6 @@ def run_store_job(job_id: str, user_id: str, store_url: str, destination: str, d
                 _append_log(job_id, "Job cancelled by user.")
                 break
 
-            # Check credits
             if _get_user_credits(user_id) < 1:
                 _append_log(job_id, "Credits exhausted — job paused.")
                 _update_job(job_id, status="paused")
@@ -514,7 +456,6 @@ def run_store_job(job_id: str, user_id: str, store_url: str, destination: str, d
                 _update_job(job_id, total_images=total_images_all)
                 _append_log(job_id, f"  Found {len(images)} images")
 
-                # Create album subfolder
                 album_folder = None
                 if destination == "drive" and drive_token and root_folder:
                     album_folder = _drive_create_folder(drive_token, album_name or album_title, root_folder)
@@ -533,7 +474,7 @@ def run_store_job(job_id: str, user_id: str, store_url: str, destination: str, d
                 _append_log(job_id, f"  Error in album {album_title}: {e}")
                 albums_done += 1
 
-            time.sleep(1)  # Pause between albums
+            time.sleep(1.5) # Respeita o servidor entre álbuns
 
         _update_job(job_id, status="completed")
         _append_log(job_id, f"Store completed. {albums_done}/{len(albums)} albums processed.")
