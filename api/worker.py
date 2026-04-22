@@ -77,28 +77,34 @@ def _extract_photo_ids_and_images(html, base_url):
 
     # Estratégia JSON
     for script in soup.find_all("script"):
-        text = script.string or ""
+        text = script.get_text()
         if "JSON.parse" in text:
             try:
-                # Regex robusta para capturar o conteúdo entre aspas do JSON.parse
-                match = re.search(r'JSON\.parse\(([\'"])(.*?)\1\)', text, re.DOTALL)
+                # Regex mais flexível para capturar o conteúdo do JSON.parse
+                match = re.search(r'JSON\.parse\([\'"](.+?)[\'"]\)', text, re.DOTALL)
                 if match:
-                    raw_content = match.group(2)
+                    raw_content = match.group(1)
                     # Limpeza profunda do JSON escapado
                     raw_json = raw_content.replace('\\"', '"').replace("\\'", "'").replace('\\\\', '\\')
+                    
+                    # Remove escapes extras de barras que a Yupoo coloca
+                    raw_json = raw_json.replace('\\/', '/')
+                    
                     data = json.loads(raw_json)
                     photos = data.get("album", {}).get("photos", [])
-                    for p in photos:
-                        url = p.get("origin_src") or p.get("big_src") or p.get("src")
-                        if not url: continue
-                        if url.startswith("//"): url = "https:" + url
-                        
-                        clean_url = re.sub(r'\?.*$', '', url)
-                        photo_id = clean_url.split("/")[-2] if "/" in clean_url else clean_url
-                        
-                        if is_valid_yupoo_image(clean_url, p.get("title", "")) and photo_id not in seen_ids:
-                            seen_ids.add(photo_id)
-                            images.append(clean_url)
+                    
+                    if photos:
+                        for p in photos:
+                            url = p.get("origin_src") or p.get("big_src") or p.get("src")
+                            if not url: continue
+                            if url.startswith("//"): url = "https:" + url
+                            
+                            clean_url = re.sub(r'\?.*$', '', url)
+                            photo_id = clean_url.split("/")[-2] if "/" in clean_url else clean_url
+                            
+                            if is_valid_yupoo_image(clean_url, p.get("title", "")) and photo_id not in seen_ids:
+                                seen_ids.add(photo_id)
+                                images.append(clean_url)
             except Exception as e:
                 logger.debug(f"JSON Parse fail: {e}")
 
@@ -106,9 +112,10 @@ def _extract_photo_ids_and_images(html, base_url):
     for a in soup.find_all("a", href=True):
         if "/photos/" in a["href"]:
             parts = a["href"].split("/")
-            if len(parts) > 2:
-                pid = parts[2]
-                if pid not in photo_ids: photo_ids.append(pid)
+            # /photos/username/12345/
+            for p in parts:
+                if p.isdigit() and len(p) > 5:
+                    if p not in photo_ids: photo_ids.append(p)
 
     return images, photo_ids, album_name
 
