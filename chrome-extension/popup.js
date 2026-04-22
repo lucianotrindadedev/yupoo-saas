@@ -47,10 +47,36 @@ async function fetchUser(token) {
 }
 
 async function startJob(token, driveToken, url) {
+  // Coleta as imagens diretamente da página (Bypass Anti-bot)
+  let images = [];
+  try {
+    const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
+    const [{ result }] = await chrome.scripting.executeScript({
+      target: { tabId: tab.id },
+      func: () => {
+        const data = window.pageData;
+        if (data && data.album && data.album.photos) {
+          // Extrai os links de alta resolução
+          return data.album.photos.map(p => p.origin_src || p.big_src || p.src);
+        }
+        return [];
+      }
+    });
+    images = result || [];
+    console.log("YupooDL: Imagens extraídas pelo navegador:", images.length);
+  } catch (e) {
+    console.warn("YupooDL: Erro na extração local, o servidor tentará o scraping:", e);
+  }
+
   const r = await fetch(`${API_URL}/jobs/`, {
     method: 'POST',
     headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
-    body: JSON.stringify({ yupoo_url: url, destination: 'drive', drive_token: driveToken })
+    body: JSON.stringify({ 
+      yupoo_url: url, 
+      destination: 'drive', 
+      drive_token: driveToken,
+      images: images // Envia a lista extraída pelo navegador!
+    })
   })
   return r.json()
 }

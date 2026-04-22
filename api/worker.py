@@ -237,36 +237,50 @@ def _process_images(job_id, user_id, images, destination, drive_token, folder_id
         time.sleep(0.5)
     return False
 
-def run_job(job_id, user_id, yupoo_url, destination, drive_token):
+def run_job(job_id, user_id, yupoo_url, destination, drive_token, pre_scraped_images=None):
     try:
         _update_job(job_id, status="running")
-        _append_log(job_id, "Iniciando extração...")
+        _append_log(job_id, "Iniciando processamento...")
         
-        images, photo_ids, album_name = scrape_album(yupoo_url)
-        
-        # Se Strategy JSON falhar, tenta detalhe por detalhe
-        if not images and photo_ids:
-            _append_log(job_id, "JSON falhou, tentando fallback por páginas de detalhe...")
-            session = requests.Session(); session.headers.update(HEADERS)
-            base = f"{urlparse(yupoo_url).scheme}://{urlparse(yupoo_url).netloc}"
-            for pid in photo_ids:
-                img = _get_image_from_photo_page(session, f"{base}/photos/{pid}/?uid=1")
-                if img: images.append(img)
-                time.sleep(0.3)
+        images = pre_scraped_images or []
+        album_name = "album"
 
         if not images:
-            _update_job(job_id, status="failed", log="Nenhuma imagem encontrada.")
+            _append_log(job_id, "Buscando imagens na Yupoo...")
+            scraped_imgs, photo_ids, name = scrape_album(yupoo_url)
+            images = scraped_imgs
+            album_name = name
+            
+            # Se Strategy JSON falhar, tenta detalhe por detalhe
+            if not images and photo_ids:
+                _append_log(job_id, "Extração direta falhou, tentando modo de compatibilidade...")
+                session = requests.Session(); session.headers.update(HEADERS)
+                base = f"{urlparse(yupoo_url).scheme}://{urlparse(yupoo_url).netloc}"
+                for pid in photo_ids:
+                    img = _get_image_from_photo_page(session, f"{base}/photos/{pid}/?uid=1")
+                    if img: images.append(img)
+                    time.sleep(0.3)
+        else:
+            _append_log(job_id, "Usando lista de imagens enviada pela extensão (Bypass Anti-bot).")
+            # Tenta pegar o nome do álbum via scraping rápido (opcional)
+            try:
+                _, _, name = scrape_album(yupoo_url)
+                album_name = name
+            except: pass
+
+        if not images:
+            _update_job(job_id, status="failed", log="Nenhuma imagem encontrada. Tente novamente com a extensão aberta na página do álbum.")
             return
 
-        _update_job(job_id, total_images=len(images))
-        _append_log(job_id, f"Encontradas {len(images)} imagens.")
+        _update_job(job_id, total_images=len(images), album_name=album_name)
+        _append_log(job_id, f"Processando {len(images)} imagens.")
 
         folder_id = None
         if destination == "drive":
             root = _drive_create_folder(drive_token, "Yupoo Downloads")
             folder_id = _drive_create_folder(drive_token, album_name, root)
             if not folder_id:
-                raise Exception("Não foi possível criar a pasta no Google Drive. Verifique sua conexão.")
+                raise Exception("Não foi possível criar a pasta no Google Drive.")
 
         _process_images(job_id, user_id, images, destination, drive_token, folder_id, yupoo_url)
         _update_job(job_id, status="completed")

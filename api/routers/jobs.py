@@ -11,13 +11,11 @@ class JobCreate(BaseModel):
     yupoo_url: str
     destination: str = "drive"
     drive_token: str = ""
+    images: list[str] = [] # Lista de imagens enviadas pela extensão
 
 def _is_store_url(url: str) -> bool:
-    """Detect if URL is a store root (e.g. store.x.yupoo.com/albums) vs album (e.g. store.x.yupoo.com/albums/12345)"""
-    # Album URLs have /albums/{numeric_id}
     if re.search(r'/albums/\d+', url):
         return False
-    # Store URLs are like: store.x.yupoo.com or store.x.yupoo.com/albums
     return True
 
 @router.post("/")
@@ -43,7 +41,8 @@ def create_job(body: JobCreate, request: Request, background_tasks: BackgroundTa
     if is_store:
         background_tasks.add_task(run_store_job, job_id, user["id"], body.yupoo_url, body.destination, body.drive_token)
     else:
-        background_tasks.add_task(run_job, job_id, user["id"], body.yupoo_url, body.destination, body.drive_token)
+        # Passa a lista de imagens (se houver) para o worker
+        background_tasks.add_task(run_job, job_id, user["id"], body.yupoo_url, body.destination, body.drive_token, body.images)
 
     return {"job_id": job_id, "status": "pending", "type": job_type}
 
